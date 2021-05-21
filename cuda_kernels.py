@@ -1,11 +1,6 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-
 import pycuda
 import pycuda.autoinit
 import pycuda.driver as cuda
-from pycuda import gpuarray
 from pycuda.compiler import SourceModule
 
 source_module = SourceModule(
@@ -633,24 +628,6 @@ source_module = SourceModule(
         float b_diff = (float)obs_color[b_pixel_idx] - (float)rendered_color[b_pixel_idx];
         diff[pixel_idx] = sqrt(r_diff*r_diff + g_diff*g_diff + b_diff*b_diff);
     }
-
-    __global__
-    void indexTest(float *output, int *dim)
-    {
-        const int x = _X;
-        const int y = _Y;
-        const int z = _Z;
-
-        if (x >= dim[0] || y >= dim[1] || z >= dim[2]) {
-            return;
-        }
-
-        size_t global_idx = getVoxelIndex(x, y, z, dim);
-
-        output[global_idx] = z * dim[0] * dim[1] + y * dim[0] + x + 1;
-        // output[global_idx] = x*x + y*y;
-    }
-
     """
 )
 
@@ -663,35 +640,3 @@ if __name__ == '__main__':
     print(f"Max block dim: x:{device.MAX_BLOCK_DIM_X}, y:{device.MAX_BLOCK_DIM_Y}, z:{device.MAX_BLOCK_DIM_Z}")
     print(f"Max grid dim: x:{device.MAX_GRID_DIM_X}, y:{device.MAX_GRID_DIM_Y}, z:{device.MAX_GRID_DIM_Z}")
 
-    index_test = source_module.get_function("indexTest")
-    x_dim, y_dim, z_dim = 4, 4, 2
-    xyz = x_dim * y_dim * z_dim
-    dim = np.array([x_dim, y_dim, z_dim], dtype=np.int32)
-
-    block_x, block_y, block_z = 8, 8, 16  # block_x * block_y * block_z must equal to 1024
-    grid_x = int(np.ceil(x_dim / block_x))
-    grid_y = int(np.ceil(y_dim / block_y))
-    grid_z = int(np.ceil(z_dim / block_z))
-    print(grid_x, grid_y, grid_z)
-
-    output_d = gpuarray.GPUArray(shape=(xyz), dtype=np.float32)
-    dim_d = gpuarray.to_gpu(dim)
-    index_test(output_d, dim_d, block=(block_x, block_y, block_z), grid=(grid_x, grid_y, grid_z))
-    output = output_d.get()
-    print(output.shape)
-    print(output.dtype)
-    print(output)
-    print(output.reshape((z_dim, y_dim, x_dim)).transpose(2, 1, 0)[:,:,1])
-    # print(output.reshape((grid_z * 16, grid_y * 8, grid_x * 8)).transpose(2, 1, 0)[:x_dim, :y_dim, :z_dim])
-
-    fusion_func = source_module.get_function("integrate")
-    ray_cast = source_module.get_function("rayCasting")
-    print(ray_cast)
-
-    points = np.zeros(shape=(2, 3, 4), dtype=np.float32)
-    points[0] = 3
-    points_gpu = gpuarray.to_gpu(points)
-    valid_indices = gpuarray.zeros(shape=(24), dtype=np.uint8) + 1
-    print(points_gpu)
-    print(valid_indices)
-    print(gpuarray.take(points_gpu, valid_indices))

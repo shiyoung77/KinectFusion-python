@@ -124,10 +124,8 @@ def plane_detection_ransac(pcd: o3d.geometry.PointCloud,
         if inlier_ratio > early_stop_thresh:
             break
     
-    if plane_normal[2] < 0:
+    if plane_normal @ origin > 0:
         plane_normal *= -1
-    # if plane_normal @ origin > 0:
-    #     plane_normal *= -1
 
     # randomly sample x_dir and y_dir given plane normal as z_dir
     x_dir = np.array([-plane_normal[2], 0, plane_normal[0]])

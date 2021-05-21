@@ -1,14 +1,11 @@
 import open3d as o3d
 import numpy as np
 import scipy.linalg as la
-import time
-import os
-import json
 from skimage import measure
 
 import pycuda.autoinit
 import pycuda.driver as cuda
-from pycuda import gpuarray, cumath
+from pycuda import gpuarray
 
 from cuda_kernels import source_module
 

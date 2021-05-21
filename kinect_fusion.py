@@ -1,27 +1,14 @@
 import os
-import pickle
 import copy
-import json
 import open3d as o3d
 import numpy as np
 import cv2
-import matplotlib.pyplot as plt
 import scipy.linalg as la
-from scipy.io import loadmat
-from tqdm import tqdm
-from tqdm.contrib import tzip
-
-import pycuda.autoinit
-import pycuda.driver as cuda
-from pycuda import gpuarray
+from tqdm.contrib import tenumerate
 
 from tsdf_lib import TSDFVolume
-from cuda_kernels import source_module
 import utils
 from config import get_config, print_config
-
-# open3d version should be at least 0.11.0
-reg = o3d.pipelines.registration
 
 class KinectFusion:
 
@@ -74,6 +61,7 @@ class KinectFusion:
             return KinectFusion.multiscale_icp(tgt, src, voxel_size_list, max_iter_list,
                                                init=la.inv(init), inverse=True)
 
+        reg = o3d.pipelines.registration   # open3d version should be at least 0.11.0
         transformation = init
         result_icp = None
         for i, (voxel_size, max_iter) in enumerate(zip(voxel_size_list, max_iter_list)):
@@ -84,7 +72,6 @@ class KinectFusion:
             tgt_down.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*3, max_nn=30))
 
             estimation_method = reg.TransformationEstimationPointToPlane()
-            # estimation_method = reg.TransformationEstimationPointToPoint()
             result_icp = reg.registration_icp(
                 src_down, tgt_down, max_correspondence_distance=voxel_size*3,
                 init=transformation,
@@ -160,42 +147,22 @@ class KinectFusion:
 
 
 if __name__ == '__main__':
-    ycb_data_folder = os.path.expanduser('~/dataset/YCB_Video_Dataset')
+    video_folder = '/mnt/evo/dataset/custom_ycb/data/0000'   # link this folder to YCB_Video_Dataset
+    prefix_list = sorted([i.split('-')[0] for i in os.listdir(video_folder) if 'color' in i])
 
-    for video_id in range(92):
-        video_folder = os.path.join(ycb_data_folder, 'data', str(video_id).zfill(4))
-        prefix_list = sorted([i.split('-')[0] for i in os.listdir(video_folder) if i.endswith('mat')])
+    cfg = get_config(camera='rutgers_415')
+    print_config(cfg)
+    
+    kf = KinectFusion(cfg=cfg)
+    for idx, prefix in tenumerate(prefix_list):
+        color_im_path = os.path.join(video_folder, f'{prefix}-color.png')
+        depth_im_path = os.path.join(video_folder, f'{prefix}-depth.png')
 
-        color_im_list = []
-        depth_im_list = []
-        meta_list = []
-        box_list = []
+        color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
+        depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
+        depth_im[depth_im > cfg['depth_trunc']] = 0  # depth truncation
 
-        if video_id <= 59:
-            config = get_config(camera='uw')
-        else:
-            config = get_config(camera='cmu')
-        
-        print_config(config)
-        print("reading images and meta files...")
-        for idx, prefix in enumerate(tqdm(prefix_list)):
-            color_im_path = os.path.join(video_folder, f'{prefix}-color.png')
-            depth_im_path = os.path.join(video_folder, f'{prefix}-depth.png')
-            meta_path = os.path.join(video_folder, f"{prefix}-meta.mat")
-            # box_path = os.path.join(video_folder, f"{prefix}-box.txt")
+        kf.update(color_im, depth_im)
 
-            meta = loadmat(meta_path)
-            depth_scale = meta['factor_depth']
-            color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
-            depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / depth_scale
-            depth_im[depth_im > 1.5] = 0  # depth truncation
-
-            color_im_list.append(color_im)
-            depth_im_list.append(depth_im)
-            meta_list.append(meta)
-            
-        kf = KinectFusion(cfg=config)
-        for idx, (color_im, depth_im) in enumerate(tzip(color_im_list, depth_im_list)):
-            kf.update(color_im, depth_im)
-        output_dir = os.path.join(ycb_data_folder, 'recon', str(video_id).zfill(4))
-        kf.save(output_dir)
+    output_dir = os.path.join(video_folder, 'recon')
+    kf.save(output_dir)
