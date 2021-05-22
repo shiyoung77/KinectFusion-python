@@ -1,6 +1,8 @@
 import os
 import copy
 import open3d as o3d
+import cupoch as cph
+from cupoch import registration as reg
 import numpy as np
 import cv2
 import scipy.linalg as la
@@ -50,8 +52,8 @@ class KinectFusion:
         self.cam_poses.append(cam_pose)
 
     @staticmethod
-    def multiscale_icp(src: o3d.geometry.PointCloud,
-                       tgt: o3d.geometry.PointCloud,
+    def multiscale_icp(src: cph.geometry.PointCloud,
+                       tgt: cph.geometry.PointCloud,
                        voxel_size_list: list, 
                        max_iter_list: list,
                        init: np.ndarray = np.eye(4),
@@ -61,22 +63,21 @@ class KinectFusion:
             return KinectFusion.multiscale_icp(tgt, src, voxel_size_list, max_iter_list,
                                                init=la.inv(init), inverse=True)
 
-        reg = o3d.pipelines.registration   # open3d version should be at least 0.11.0
-        transformation = init
+        transformation = init.astype(np.float32)
         result_icp = None
         for i, (voxel_size, max_iter) in enumerate(zip(voxel_size_list, max_iter_list)):
             src_down = src.voxel_down_sample(voxel_size)
             tgt_down = tgt.voxel_down_sample(voxel_size)
 
-            src_down.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*3, max_nn=30))
-            tgt_down.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*3, max_nn=30))
+            src_down.estimate_normals(cph.geometry.KDTreeSearchParamKNN(knn=30))
+            tgt_down.estimate_normals(cph.geometry.KDTreeSearchParamKNN(knn=30))
 
-            estimation_method = reg.TransformationEstimationPointToPlane()
             result_icp = reg.registration_icp(
                 src_down, tgt_down, max_correspondence_distance=voxel_size*3,
                 init=transformation,
-                estimation_method=estimation_method,
-                criteria=reg.ICPConvergenceCriteria(max_iteration=max_iter))
+                estimation_method=reg.TransformationEstimationPointToPlane(),
+                criteria=reg.ICPConvergenceCriteria(max_iteration=max_iter)
+            )
             transformation = result_icp.transformation
 
         if inverse and result_icp is not None:
@@ -85,7 +86,12 @@ class KinectFusion:
         return result_icp
 
     def update_pose_using_icp(self, depth_im):
-        curr_pcd = utils.create_pcd(depth_im, self.cfg['cam_intr'])
+        # curr_pcd = utils.create_pcd(depth_im, self.cfg['cam_intr'])
+
+        depth_im= cph.geometry.Image(depth_im)
+        cam_intr = cph.camera.PinholeCameraIntrinsic()
+        cam_intr.intrinsic_matrix = self.cfg['cam_intr']
+        curr_pcd = cph.geometry.PointCloud.create_from_depth_image(depth_im, cam_intr)
 
         # #------------------------------ frame to frame ICP (open loop) ------------------------------
         # open_loop_fitness = 0
@@ -99,8 +105,10 @@ class KinectFusion:
         cam_pose = la.inv(self.transformation)
         rendered_depth, _ = self.tsdf_volume.ray_casting(self.cfg['im_w'], self.cfg['im_h'], self.cfg['cam_intr'], 
                                                          cam_pose, to_host=True)
-        rendered_pcd = utils.create_pcd(rendered_depth, self.cfg['cam_intr'])
+        # rendered_pcd = utils.create_pcd(rendered_depth, self.cfg['cam_intr'])
 
+        rendered_depth = cph.geometry.Image(rendered_depth)
+        rendered_pcd = cph.geometry.PointCloud.create_from_depth_image(rendered_depth, cam_intr)
         result_icp = self.multiscale_icp(rendered_pcd,
                                          curr_pcd,
                                          voxel_size_list=[0.025, 0.01],
@@ -113,9 +121,7 @@ class KinectFusion:
         return True
 
     def update(self, color_im, depth_im):
-        if self.tsdf_volume is None:
-            self.initialize_tsdf_volume(color_im, depth_im, visualize=False)
-            return True
+        assert self.tsdf_volume is not None, "TSDF volume has not been initialized."
 
         success = self.update_pose_using_icp(depth_im)
         if success:
@@ -154,14 +160,22 @@ if __name__ == '__main__':
     print_config(cfg)
     
     kf = KinectFusion(cfg=cfg)
-    for idx, prefix in tenumerate(prefix_list):
-        color_im_path = os.path.join(video_folder, f'{prefix}-color.png')
-        depth_im_path = os.path.join(video_folder, f'{prefix}-depth.png')
 
+    # initialize TSDF with the first frame
+    color_im_path = os.path.join(video_folder, prefix_list[0] + '-color.png')
+    depth_im_path = os.path.join(video_folder, prefix_list[0] + '-depth.png')
+    color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
+    depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
+    depth_im[depth_im > cfg['depth_trunc']] = 0
+    kf.initialize_tsdf_volume(color_im, depth_im, visualize=False)
+
+    # Update TSDF volume
+    for _, prefix in tenumerate(prefix_list[1:]):
+        color_im_path = os.path.join(video_folder, prefix + '-color.png')
+        depth_im_path = os.path.join(video_folder, prefix + '-depth.png')
         color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
         depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
-        depth_im[depth_im > cfg['depth_trunc']] = 0  # depth truncation
-
+        depth_im[depth_im > cfg['depth_trunc']] = 0
         kf.update(color_im, depth_im)
 
     output_dir = os.path.join(video_folder, 'recon')
