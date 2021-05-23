@@ -151,32 +151,3 @@ class KinectFusion:
         o3d.io.write_point_cloud(os.path.join(output_folder, 'recon.pcd'), surface)
         print(f"Results have been saved to {output_folder}.")
 
-
-if __name__ == '__main__':
-    video_folder = '/mnt/evo/dataset/custom_ycb/data/0000'   # link this folder to YCB_Video_Dataset
-    prefix_list = sorted([i.split('-')[0] for i in os.listdir(video_folder) if 'color' in i])
-
-    cfg = get_config(camera='rutgers_415')
-    print_config(cfg)
-    
-    kf = KinectFusion(cfg=cfg)
-
-    # initialize TSDF with the first frame
-    color_im_path = os.path.join(video_folder, prefix_list[0] + '-color.png')
-    depth_im_path = os.path.join(video_folder, prefix_list[0] + '-depth.png')
-    color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
-    depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
-    depth_im[depth_im > cfg['depth_trunc']] = 0
-    kf.initialize_tsdf_volume(color_im, depth_im, visualize=False)
-
-    # Update TSDF volume
-    for _, prefix in tenumerate(prefix_list[1:]):
-        color_im_path = os.path.join(video_folder, prefix + '-color.png')
-        depth_im_path = os.path.join(video_folder, prefix + '-depth.png')
-        color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
-        depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
-        depth_im[depth_im > cfg['depth_trunc']] = 0
-        kf.update(color_im, depth_im)
-
-    output_dir = os.path.join(video_folder, 'recon')
-    kf.save(output_dir)
