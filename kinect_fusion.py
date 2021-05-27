@@ -4,13 +4,10 @@ import open3d as o3d
 import cupoch as cph
 from cupoch import registration as reg
 import numpy as np
-import cv2
 import scipy.linalg as la
-from tqdm.contrib import tenumerate
 
 from tsdf_lib import TSDFVolume
-import utils
-from config import get_config, print_config
+import kf_utils as utils
 
 class KinectFusion:
 
@@ -131,7 +128,7 @@ class KinectFusion:
         else:
             self.cam_poses.append(np.eye(4))
 
-    def save(self, output_folder):
+    def save(self, output_folder, voxel_size=0.005):
         if os.path.exists(output_folder):
             key = input(f"{output_folder} exists. Do you want to overwrite? (y/n)")
             while key.lower() not in ['y', 'n']:
@@ -147,7 +144,7 @@ class KinectFusion:
             **self.cfg, 
         )
         self.tsdf_volume.save(os.path.join(output_folder, 'tsdf.npz'))
-        surface = self.tsdf_volume.get_surface_cloud_marching_cubes(voxel_size=0.005)
+        surface = self.tsdf_volume.get_surface_cloud_marching_cubes(voxel_size=voxel_size)
         o3d.io.write_point_cloud(os.path.join(output_folder, 'recon.pcd'), surface)
         print(f"Results have been saved to {output_folder}.")
 
