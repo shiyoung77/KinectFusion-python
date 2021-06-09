@@ -169,7 +169,7 @@ class TSDFVolume:
         tsdf_vol, color_vol, weight_vol = self.get_volume()
 
         # Marching cubes
-        verts = measure.marching_cubes(tsdf_vol, level=0)[0]
+        verts, faces, normals, values = measure.marching_cubes(tsdf_vol, level=0)
         verts_ind = np.round(verts).astype(int)
 
         # remove false surface
@@ -178,6 +178,20 @@ class TSDFVolume:
         valid_idx = (verts_weight > 0) & (np.abs(verts_val) < 0.2)
         verts_ind = verts_ind[valid_idx]
         verts = verts[valid_idx]
+        normals = normals[valid_idx]
+
+        # make normals point to the inward (positive -> negative) direction
+        back_verts = verts - normals
+        forward_verts = verts + normals
+        back_verts = np.clip(back_verts, a_min=np.zeros(3), a_max=np.array(tsdf_vol.shape)-1)
+        forward_verts = np.clip(forward_verts, a_min=np.zeros(3), a_max=np.array(tsdf_vol.shape)-1)
+        back_ind = np.round(back_verts).astype(int)
+        forward_ind = np.round(forward_verts).astype(int)
+
+        back_val = tsdf_vol[back_ind[:, 0], back_ind[:, 1], back_ind[:, 2]]
+        forward_val = tsdf_vol[forward_ind[:, 0], forward_ind[:, 1], forward_ind[:, 2]]
+        normals[(forward_val - back_val) > 0] *= -1
+
         verts = verts*self._voxel_size + self._vol_origin
 
         # Get vertex colors
@@ -190,6 +204,7 @@ class TSDFVolume:
         surface_cloud = o3d.geometry.PointCloud()
         surface_cloud.points = o3d.utility.Vector3dVector(verts)
         surface_cloud.colors = o3d.utility.Vector3dVector(colors / 255)
+        surface_cloud.normals = o3d.utility.Vector3dVector(normals)
         surface_cloud = surface_cloud.voxel_down_sample(voxel_size=voxel_size)
         return surface_cloud
 
