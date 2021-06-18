@@ -21,8 +21,11 @@ class KinectFusion:
 
     def initialize_tsdf_volume(self, color_im, depth_im, visualize=False):
         pcd = utils.create_pcd(depth_im, self.cfg['cam_intr'], color_im)
-        plane_frame, inlier_ratio = utils.plane_detection_ransac(pcd, inlier_thresh=0.005, early_stop_thresh=0.6,
-                                                                 visualize=visualize)
+        # plane_frame, inlier_ratio = utils.timeit(utils.plane_detection_ransac)(pcd, inlier_thresh=0.005, 
+        #     max_iterations=500, early_stop_thresh=0.4, visualize=True)
+
+        plane_frame, inlier_ratio = utils.timeit(utils.plane_detection_o3d)(pcd,
+            max_iterations=500, inlier_thresh=0.005, visualize=False)
         
         cam_pose = la.inv(plane_frame)
         transformed_pcd = copy.deepcopy(pcd).transform(la.inv(plane_frame))
@@ -31,7 +34,7 @@ class KinectFusion:
         vol_bnds = np.zeros((3, 2), dtype=np.float32)
         vol_bnds[:, 0] = transformed_pts.min(0)
         vol_bnds[:, 1] = transformed_pts.max(0)
-        vol_bnds[2] = [-0.01, 0.25]
+        vol_bnds[2] = [-0.01, 0.3]
 
         if visualize:
             vol_box = o3d.geometry.OrientedBoundingBox()
