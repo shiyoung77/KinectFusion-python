@@ -12,7 +12,7 @@ from cuda_kernels import source_module
 
 class TSDFVolume:
 
-    def __init__(self, vol_bnds, voxel_size, trunc_margin=0.015):
+    def __init__(self, vol_bnds, voxel_size, vol_dim=None, trunc_margin=0.015):
         """
         Args:
             vol_bnds (ndarray): An ndarray of shape (3, 2). Specifies the xyz bounds (min/max) in meters.
@@ -28,7 +28,11 @@ class TSDFVolume:
         self._color_const = np.float32(256 * 256)
 
         # Adjust volume bounds and ensure C-order contiguous
-        self._vol_dim = np.ceil((self._vol_bnds[:,1] - self._vol_bnds[:,0])/self._voxel_size).copy(order='C').astype(int)
+        if vol_dim is None:
+            self._vol_dim = np.ceil((self._vol_bnds[:,1] - self._vol_bnds[:,0])/self._voxel_size).copy(order='C').astype(int)
+        else:
+            self._vol_dim = vol_dim
+
         self._vol_bnds[:,1] = self._vol_bnds[:,0] + self._vol_dim*self._voxel_size
         self._vol_origin = self._vol_bnds[:,0].copy(order='C').astype(np.float32)
 
@@ -222,6 +226,7 @@ class TSDFVolume:
     def save(self, output_path):
         np.savez_compressed(output_path,
             vol_bounds=self._vol_bnds,
+            vol_dim=self._vol_dim,
             voxel_size=self._voxel_size,
             trunc_margin=self._trunc_margin,
             tsdf_vol=self._tsdf_vol_gpu.get(),
@@ -233,11 +238,12 @@ class TSDFVolume:
     @classmethod
     def load(cls, input_path):
         loaded = np.load(input_path)
-        print('loaded vol bounds:', loaded['vol_bounds'])
+        print('loaded vol dim:', loaded['vol_dim'])
         print('loaded voxel_size:', loaded['voxel_size'])
         print('loaded trunc_margin:', loaded['trunc_margin'])
         print("shape", loaded['tsdf_vol'].shape)
-        obj = cls(loaded['vol_bounds'], loaded['voxel_size'], loaded['trunc_margin'])
+        obj = cls(vol_bnds=loaded['vol_bounds'], voxel_size=loaded['voxel_size'],
+                  vol_dim=loaded['vol_dim'], trunc_margin=loaded['trunc_margin'])
         obj._tsdf_vol_gpu = gpuarray.to_gpu(loaded['tsdf_vol'])
         obj._weight_vol_gpu = gpuarray.to_gpu(loaded['weight_vol'])
         obj._color_vol_gpu = gpuarray.to_gpu(loaded['color_vol'])
