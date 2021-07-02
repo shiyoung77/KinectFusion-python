@@ -20,7 +20,7 @@ class KinectFusion:
         self.cam_poses = []   # store the tracking results
 
     def initialize_tsdf_volume(self, color_im, depth_im, visualize=False):
-        pcd = utils.create_pcd(depth_im, self.cfg['cam_intr'], color_im)
+        pcd = utils.create_pcd(depth_im, self.cfg['cam_intr'], color_im, depth_trunc=3)
         # plane_frame, inlier_ratio = utils.timeit(utils.plane_detection_ransac)(pcd, inlier_thresh=0.005, 
         #     max_iterations=500, early_stop_thresh=0.4, visualize=True)
 
@@ -29,6 +29,7 @@ class KinectFusion:
         
         cam_pose = la.inv(plane_frame)
         transformed_pcd = copy.deepcopy(pcd).transform(la.inv(plane_frame))
+        o3d.visualization.draw_geometries([transformed_pcd])
         transformed_pts = np.asarray(transformed_pcd.points)
 
         vol_bnds = np.zeros((3, 2), dtype=np.float32)

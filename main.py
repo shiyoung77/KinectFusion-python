@@ -11,7 +11,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--dataset", type=str, default='/home/lsy/dataset/custom_ycb')
     parser.add_argument("-v", "--video", type=str, default="0011")
-    parser.add_argument("--depth_trunc", type=float, default=1.8)
+    parser.add_argument("--depth_trunc", type=float, default=2.0)
     args = parser.parse_args()
 
     video_folder = os.path.join(args.dataset, args.video)
