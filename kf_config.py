@@ -2,7 +2,7 @@ import numpy as np
 
 def get_config():
     config = dict()
-    config['tsdf_voxel_size'] = 0.0025  # in meter
+    config['tsdf_voxel_size'] = 0.002  # in meter
     config['tsdf_trunc_margin'] = 0.015 # in meter
     config['pcd_voxel_size'] = 0.005  # in meter
     return config

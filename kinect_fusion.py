@@ -29,7 +29,6 @@ class KinectFusion:
         
         cam_pose = la.inv(plane_frame)
         transformed_pcd = copy.deepcopy(pcd).transform(la.inv(plane_frame))
-        o3d.visualization.draw_geometries([transformed_pcd])
         transformed_pts = np.asarray(transformed_pcd.points)
 
         vol_bnds = np.zeros((3, 2), dtype=np.float32)
