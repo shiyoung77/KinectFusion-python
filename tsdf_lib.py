@@ -7,7 +7,7 @@ import pycuda.autoinit
 import pycuda.driver as cuda
 from pycuda import gpuarray
 
-from cuda_kernels import source_module
+from .cuda_kernels import source_module
 
 
 class TSDFVolume:
@@ -83,7 +83,7 @@ class TSDFVolume:
             self._tsdf_vol_gpu,
             self._weight_vol_gpu,
             self._color_vol_gpu,
-            cuda.InOut(self._vol_dim.astype(np.int32)), 
+            cuda.InOut(self._vol_dim.astype(np.int32)),
             cuda.InOut(self._vol_origin.astype(np.float32)),
             np.float32(self._voxel_size),
             cuda.InOut(cam_intr.reshape(-1).astype(np.float32)),
@@ -106,7 +106,7 @@ class TSDFVolume:
             self._tsdf_vol_gpu,
             self._color_vol_gpu,
             self._weight_vol_gpu,
-            cuda.InOut(self._vol_dim.astype(np.int32)), 
+            cuda.InOut(self._vol_dim.astype(np.int32)),
             cuda.InOut(self._vol_origin.astype(np.float32)),
             np.float32(self._voxel_size),
             cuda.InOut(cam_intr.reshape(-1).astype(np.float32)),
@@ -140,7 +140,7 @@ class TSDFVolume:
             self._tsdf_vol_gpu,
             self._color_vol_gpu,
             self._weight_vol_gpu,
-            cuda.InOut(self._vol_dim.astype(np.int32)), 
+            cuda.InOut(self._vol_dim.astype(np.int32)),
             cuda.InOut(self._vol_origin.astype(np.float32)),
             np.float32(self._voxel_size),
             cuda.InOut(cam_intr.reshape(-1).astype(np.float32)),
@@ -232,7 +232,7 @@ class TSDFVolume:
             tsdf_vol=self._tsdf_vol_gpu.get(),
             weight_vol=self._weight_vol_gpu.get(),
             color_vol=self._color_vol_gpu.get()
-        )        
+        )
         print(f"tsdf volume has been saved to: {output_path}")
 
     @classmethod
@@ -249,4 +249,3 @@ class TSDFVolume:
         obj._color_vol_gpu = gpuarray.to_gpu(loaded['color_vol'])
         print(f"tsdf volume has been loaded from: {input_path}")
         return obj
-        

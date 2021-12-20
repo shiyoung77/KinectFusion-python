@@ -1,11 +1,15 @@
+# cd ..
+# python -m kf_pycuda.main
+
 import os
 import argparse
 import numpy as np
 import cv2
 import json
-from kinect_fusion import KinectFusion
-from kf_config import get_config
 from tqdm.contrib import tenumerate
+
+from .kinect_fusion import KinectFusion
+from .kf_config import get_config
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

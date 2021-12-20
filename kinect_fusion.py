@@ -6,8 +6,8 @@ from cupoch import registration as reg
 import numpy as np
 import scipy.linalg as la
 
-from tsdf_lib import TSDFVolume
-import kf_utils as utils
+from .tsdf_lib import TSDFVolume
+from . import kf_utils as utils
 
 class KinectFusion:
 
@@ -21,12 +21,12 @@ class KinectFusion:
 
     def initialize_tsdf_volume(self, color_im, depth_im, visualize=False):
         pcd = utils.create_pcd(depth_im, self.cfg['cam_intr'], color_im, depth_trunc=3)
-        # plane_frame, inlier_ratio = utils.timeit(utils.plane_detection_ransac)(pcd, inlier_thresh=0.005, 
+        # plane_frame, inlier_ratio = utils.timeit(utils.plane_detection_ransac)(pcd, inlier_thresh=0.005,
         #     max_iterations=500, early_stop_thresh=0.4, visualize=True)
 
         plane_frame, inlier_ratio = utils.timeit(utils.plane_detection_o3d)(pcd,
             max_iterations=500, inlier_thresh=0.005, visualize=False)
-        
+
         cam_pose = la.inv(plane_frame)
         transformed_pcd = copy.deepcopy(pcd).transform(la.inv(plane_frame))
         transformed_pts = np.asarray(transformed_pcd.points)
@@ -54,7 +54,7 @@ class KinectFusion:
     @staticmethod
     def multiscale_icp(src: cph.geometry.PointCloud,
                        tgt: cph.geometry.PointCloud,
-                       voxel_size_list: list, 
+                       voxel_size_list: list,
                        max_iter_list: list,
                        init: np.ndarray = np.eye(4),
                        inverse: bool = False):
@@ -103,7 +103,7 @@ class KinectFusion:
 
         #------------------------------ model to frame ICP (closed loop) ------------------------------
         cam_pose = la.inv(self.transformation)
-        rendered_depth, _ = self.tsdf_volume.ray_casting(self.cfg['im_w'], self.cfg['im_h'], self.cfg['cam_intr'], 
+        rendered_depth, _ = self.tsdf_volume.ray_casting(self.cfg['im_w'], self.cfg['im_h'], self.cfg['cam_intr'],
                                                          cam_pose, to_host=True)
         # rendered_pcd = utils.create_pcd(rendered_depth, self.cfg['cam_intr'])
 
@@ -144,7 +144,7 @@ class KinectFusion:
         cam_poses = np.stack(self.cam_poses)
         np.savez_compressed(os.path.join(output_folder, 'kf_results.npz'),
             cam_poses=cam_poses,
-            **self.cfg, 
+            **self.cfg,
         )
         self.tsdf_volume.save(os.path.join(output_folder, 'tsdf.npz'))
         surface = self.tsdf_volume.get_surface_cloud_marching_cubes(voxel_size=voxel_size)
