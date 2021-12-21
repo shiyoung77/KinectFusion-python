@@ -12,45 +12,38 @@ from .cuda_kernels import source_module
 
 class TSDFVolume:
 
-    def __init__(self, vol_bnds, voxel_size, vol_dim=None, trunc_margin=0.015):
+    def __init__(self, voxel_size, vol_bnds=None, vol_origin=None, vol_dim=None, trunc_margin=0.015):
         """
         Args:
             vol_bnds (ndarray): An ndarray of shape (3, 2). Specifies the xyz bounds (min/max) in meters.
             voxel_size (float): The volume discretization in meters.
         """
-        vol_bnds = np.asarray(vol_bnds)
-        assert vol_bnds.shape == (3, 2), "[!] `vol_bnds` should be of shape (3, 2)."
+        if vol_dim is not None and vol_origin is not None:
+            self._vol_dim = vol_dim
+            self._vol_origin = vol_origin
+        elif vol_bnds is not None:
+            self._vol_bnds = np.ascontiguousarray(vol_bnds, dtype=np.float32)
+            self._vol_dim = np.round((self._vol_bnds[:, 1] - self._vol_bnds[:, 0]) / voxel_size).astype(np.int32)
+            self._vol_origin = self._vol_bnds[:, 0].copy()
+        else:
+            raise ValueError("must either provide 'vol_dim' or (both 'vol_bnds' and 'vol_origin')")
 
-        # Define voxel volume parameters
-        self._vol_bnds = vol_bnds
         self._voxel_size = voxel_size
         self._trunc_margin = trunc_margin
         self._color_const = np.float32(256 * 256)
 
-        # Adjust volume bounds and ensure C-order contiguous
-        if vol_dim is None:
-            self._vol_dim = np.ceil((self._vol_bnds[:,1] - self._vol_bnds[:,0])/self._voxel_size).copy(order='C').astype(int)
-        else:
-            self._vol_dim = vol_dim
-
-        self._vol_bnds[:,1] = self._vol_bnds[:,0] + self._vol_dim*self._voxel_size
-        self._vol_origin = self._vol_bnds[:,0].copy(order='C').astype(np.float32)
-
-        print("Voxel volume size: {} x {} x {} - # points: {:,}".format(
-            self._vol_dim[0], self._vol_dim[1], self._vol_dim[2],
-            self._vol_dim[0]*self._vol_dim[1]*self._vol_dim[2])
-        )
+        print(f"TSDF volume dim: {self._vol_dim}, # points: {np.prod(self._vol_dim)}")
 
         # Copy voxel volumes to GPU
         self.block_x, self.block_y, self.block_z = 8, 8, 16  # block_x * block_y * block_z must equal to 1024
 
         x_dim, y_dim, z_dim = int(self._vol_dim[0]), int(self._vol_dim[1]), int(self._vol_dim[2])
-        xyz = x_dim * y_dim * z_dim
         self.grid_x = int(np.ceil(x_dim / self.block_x))
         self.grid_y = int(np.ceil(y_dim / self.block_y))
         self.grid_z = int(np.ceil(z_dim / self.block_z))
 
         # initialize tsdf values to be -1
+        xyz = x_dim * y_dim * z_dim
         self._tsdf_vol_gpu = gpuarray.zeros(shape=(xyz), dtype=np.float32) - 1
         self._weight_vol_gpu = gpuarray.zeros(shape=(xyz), dtype=np.float32)
         self._color_vol_gpu= gpuarray.zeros(shape=(xyz), dtype=np.float32)
@@ -98,7 +91,8 @@ class TSDFVolume:
             grid=(self.grid_x, self.grid_y, self.grid_z)
         )
 
-    def batch_ray_casting(self, im_w, im_h, cam_intr, cam_poses, inv_cam_poses, start_row=0, start_col=0, batch_size=1, to_host=True):
+    def batch_ray_casting(self, im_w, im_h, cam_intr, cam_poses, inv_cam_poses, start_row=0, start_col=0,
+                          batch_size=1, to_host=True):
         batch_color_im_gpu = gpuarray.zeros(shape=(batch_size, 3, im_h, im_w), dtype=np.uint8)
         batch_depth_im_gpu = gpuarray.zeros(shape=(batch_size, im_h, im_w), dtype=np.float32)
 
@@ -173,7 +167,7 @@ class TSDFVolume:
         tsdf_vol, color_vol, weight_vol = self.get_volume()
 
         # Marching cubes
-        verts, faces, normals, values = measure.marching_cubes(tsdf_vol, level=0)
+        verts, faces, normals, values = measure.marching_cubes_lewiner(tsdf_vol, level=0)
         verts_ind = np.round(verts).astype(int)
 
         # remove false surface
@@ -220,13 +214,12 @@ class TSDFVolume:
         conservative_volume = o3d.geometry.PointCloud()
         conservative_volume.points = o3d.utility.Vector3dVector(verts)
         conservative_volume = conservative_volume.voxel_down_sample(voxel_size=voxel_size)
-        # conservative_volume.paint_uniform_color(np.array([0.3, 0.3, 0.3]))
         return conservative_volume
 
     def save(self, output_path):
         np.savez_compressed(output_path,
-            vol_bounds=self._vol_bnds,
             vol_dim=self._vol_dim,
+            vol_origin=self._vol_origin,
             voxel_size=self._voxel_size,
             trunc_margin=self._trunc_margin,
             tsdf_vol=self._tsdf_vol_gpu.get(),
@@ -238,12 +231,14 @@ class TSDFVolume:
     @classmethod
     def load(cls, input_path):
         loaded = np.load(input_path)
-        print('loaded vol dim:', loaded['vol_dim'])
         print('loaded voxel_size:', loaded['voxel_size'])
+        print('loaded vol_bnds', loaded.get('vol_bounds'))
+        print('loaded vol_origin', loaded.get('vol_origin'))
+        print('loaded vol_dim:', loaded.get('vol_dim'))
         print('loaded trunc_margin:', loaded['trunc_margin'])
-        print("shape", loaded['tsdf_vol'].shape)
-        obj = cls(vol_bnds=loaded['vol_bounds'], voxel_size=loaded['voxel_size'],
-                  vol_dim=loaded['vol_dim'], trunc_margin=loaded['trunc_margin'])
+        obj = cls(voxel_size=loaded['voxel_size'], vol_bnds=loaded.get('vol_bounds'),
+                  vol_dim=loaded.get('vol_dim'), vol_origin=loaded.get('vol_origin'),
+                  trunc_margin=loaded['trunc_margin'])
         obj._tsdf_vol_gpu = gpuarray.to_gpu(loaded['tsdf_vol'])
         obj._weight_vol_gpu = gpuarray.to_gpu(loaded['weight_vol'])
         obj._color_vol_gpu = gpuarray.to_gpu(loaded['color_vol'])
