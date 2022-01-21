@@ -34,7 +34,7 @@ class KinectFusion:
         vol_bnds = np.zeros((3, 2), dtype=np.float32)
         vol_bnds[:, 0] = transformed_pts.min(0)
         vol_bnds[:, 1] = transformed_pts.max(0)
-        vol_bnds[2] = [-0.01, 0.35]
+        vol_bnds[2] = [-0.01, 0.45]
 
         if visualize:
             vol_box = o3d.geometry.OrientedBoundingBox()
