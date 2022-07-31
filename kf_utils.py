@@ -76,6 +76,52 @@ def batch_compute_iou(roi: np.ndarray, proposals: np.ndarray, iou_threshold=0.8)
     return ious
 
 
+def plane_detection_o3d(pcd: o3d.geometry.PointCloud,
+                        inlier_thresh: float,
+                        max_iterations: int = 1000,
+                        visualize: bool = False,
+                        in_cam_frame: bool = True):
+    # http://www.open3d.org/docs/release/tutorial/geometry/pointcloud.html#Plane-segmentation
+    plane_model, inliers = pcd.segment_plane(distance_threshold=inlier_thresh,
+                                             ransac_n=3,
+                                             num_iterations=max_iterations)
+    [a, b, c, d] = plane_model  # ax + by + cz + d = 0
+    inlier_cloud = pcd.select_by_index(inliers)
+    inlier_cloud.paint_uniform_color([1, 0, 0])
+    outlier_cloud = pcd.select_by_index(inliers, invert=True)
+    max_inlier_ratio = len(inliers) / len(np.asarray(pcd.points))
+
+    random_pt = np.asarray(inlier_cloud.points)[np.random.randint(len(inliers))]
+    x, y, z = random_pt
+    origin = np.array([x, y, (-d - a*x - b*y) / (c + 1e-8)])
+
+    plane_normal = np.array([a, b, c])
+    plane_normal /= np.linalg.norm(plane_normal)
+
+    if in_cam_frame:
+        if plane_normal @ origin > 0:
+            plane_normal *= -1
+    elif plane_normal[2] < 0:
+        plane_normal *= -1
+    
+    # randomly sample x_dir and y_dir given plane normal as z_dir
+    x_dir = np.array([-plane_normal[2], 0, plane_normal[0]])
+    x_dir /= la.norm(x_dir)
+    y_dir = np.cross(plane_normal, x_dir)
+    plane_frame = np.eye(4)
+    plane_frame[:3, 0] = x_dir
+    plane_frame[:3, 1] = y_dir
+    plane_frame[:3, 2] = plane_normal
+    plane_frame[:3, 3] = origin
+    
+    if visualize:
+        plane_frame_vis = generate_coordinate_frame(plane_frame, scale=0.05)
+        cam_frame_vis = generate_coordinate_frame(np.eye(4), scale=0.05)
+        o3d.visualization.draw_geometries([inlier_cloud, outlier_cloud, plane_frame_vis, cam_frame_vis])
+    
+    return plane_frame, max_inlier_ratio
+
+
 def plane_detection_ransac(pcd: o3d.geometry.PointCloud,
                            inlier_thresh: float,
                            max_iterations: int = 1000,
