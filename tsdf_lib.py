@@ -6,6 +6,7 @@ from skimage import measure
 import pycuda.autoinit
 import pycuda.driver as cuda
 from pycuda import gpuarray
+from pycuda.tools import make_default_context
 
 from .cuda_kernels import source_module
 
@@ -64,6 +65,8 @@ class TSDFVolume:
             weight (float, optional): weight to be assigned for the current observation. Defaults to 1.0.
         """
         im_h, im_w = depth_im.shape
+        ctx = make_default_context()
+        ctx.pop()
 
         # color image is always from host
         color_im = color_im.astype(np.float32)

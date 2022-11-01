@@ -1,8 +1,8 @@
 import os
+import time
 import copy
 import open3d as o3d
-import cupoch as cph
-from cupoch import registration as reg
+import open3d.core as o3c
 import numpy as np
 import scipy.linalg as la
 
@@ -18,14 +18,12 @@ class KinectFusion:
         self.transformation = None
         self.prev_pcd = None
         self.cam_poses = []   # store the tracking results
+        self.cam_intr = np.asarray(self.cfg['cam_intr'])
+        self.cam_intr_t = o3c.Tensor(self.cam_intr)
 
     def initialize_tsdf_volume(self, color_im, depth_im, visualize=False):
-        pcd = utils.create_pcd(depth_im, self.cfg['cam_intr'], color_im, depth_trunc=3)
-        # plane_frame, inlier_ratio = utils.timeit(utils.plane_detection_ransac)(pcd, inlier_thresh=0.005,
-        #     max_iterations=500, early_stop_thresh=0.4, visualize=True)
-
-        plane_frame, inlier_ratio = utils.timeit(utils.plane_detection_o3d)(pcd,
-            max_iterations=500, inlier_thresh=0.005, visualize=False)
+        pcd = utils.create_pcd(depth_im, self.cam_intr, color_im, depth_trunc=3)
+        plane_frame, inlier_ratio = utils.plane_detection_o3d(pcd, max_iterations=500, inlier_thresh=0.005)
 
         cam_pose = la.inv(plane_frame)
         transformed_pcd = copy.deepcopy(pcd).transform(la.inv(plane_frame))
@@ -38,86 +36,91 @@ class KinectFusion:
 
         if visualize:
             vol_box = o3d.geometry.OrientedBoundingBox()
+            vol_box.color = [1, 0, 0]
             vol_box.center = vol_bnds.mean(1)
             vol_box.extent = vol_bnds[:, 1] - vol_bnds[:, 0]
-            o3d.visualization.draw_geometries([vol_box, transformed_pcd])
+            coord = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.3)
+            o3d.visualization.draw_geometries([vol_box, transformed_pcd, coord])
 
         self.init_transformation = plane_frame.copy()
         self.transformation = plane_frame.copy()
         self.tsdf_volume = TSDFVolume(vol_bnds=vol_bnds,
                                       voxel_size=self.cfg['tsdf_voxel_size'],
                                       trunc_margin=self.cfg['tsdf_trunc_margin'])
-        self.tsdf_volume.integrate(color_im, depth_im, self.cfg['cam_intr'], cam_pose)
-        self.prev_pcd = pcd
+        self.tsdf_volume.integrate(color_im, depth_im, self.cam_intr, cam_pose)
+
+        self.prev_pcd = o3d.t.geometry.PointCloud.from_legacy(pcd)
         self.cam_poses.append(cam_pose)
 
-    @staticmethod
-    def multiscale_icp(src: cph.geometry.PointCloud,
-                       tgt: cph.geometry.PointCloud,
-                       voxel_size_list: list,
-                       max_iter_list: list,
-                       init: np.ndarray = np.eye(4),
-                       inverse: bool = False):
+    # @staticmethod
+    # def multiscale_icp(src: cph.geometry.PointCloud,
+    #                    tgt: cph.geometry.PointCloud,
+    #                    voxel_size_list: list,
+    #                    max_iter_list: list,
+    #                    init: np.ndarray = np.eye(4),
+    #                    inverse: bool = False):
 
-        if len(src.points) > len(tgt.points):
-            return KinectFusion.multiscale_icp(tgt, src, voxel_size_list, max_iter_list,
-                                               init=la.inv(init), inverse=True)
+    #     if len(src.points) > len(tgt.points):
+    #         return KinectFusion.multiscale_icp(tgt, src, voxel_size_list, max_iter_list,
+    #                                            init=la.inv(init), inverse=True)
 
-        transformation = init.astype(np.float32)
-        result_icp = None
-        for i, (voxel_size, max_iter) in enumerate(zip(voxel_size_list, max_iter_list)):
-            src_down = src.voxel_down_sample(voxel_size)
-            tgt_down = tgt.voxel_down_sample(voxel_size)
+    #     transformation = init.astype(np.float32)
+    #     result_icp = None
+    #     for i, (voxel_size, max_iter) in enumerate(zip(voxel_size_list, max_iter_list)):
+    #         src_down = src.voxel_down_sample(voxel_size)
+    #         tgt_down = tgt.voxel_down_sample(voxel_size)
 
-            src_down.estimate_normals(cph.geometry.KDTreeSearchParamKNN(knn=30))
-            tgt_down.estimate_normals(cph.geometry.KDTreeSearchParamKNN(knn=30))
+    #         src_down.estimate_normals(cph.geometry.KDTreeSearchParamKNN(knn=30))
+    #         tgt_down.estimate_normals(cph.geometry.KDTreeSearchParamKNN(knn=30))
 
-            result_icp = reg.registration_icp(
-                src_down, tgt_down, max_correspondence_distance=voxel_size*3,
-                init=transformation,
-                estimation_method=reg.TransformationEstimationPointToPlane(),
-                criteria=reg.ICPConvergenceCriteria(max_iteration=max_iter)
-            )
-            transformation = result_icp.transformation
+    #         result_icp = reg.registration_icp(
+    #             src_down, tgt_down, max_correspondence_distance=voxel_size*3,
+    #             init=transformation,
+    #             estimation_method=reg.TransformationEstimationPointToPlane(),
+    #             criteria=reg.ICPConvergenceCriteria(max_iteration=max_iter)
+    #         )
+    #         transformation = result_icp.transformation
 
-        if inverse and result_icp is not None:
-            result_icp.transformation = la.inv(result_icp.transformation)
+    #     if inverse and result_icp is not None:
+    #         result_icp.transformation = la.inv(result_icp.transformation)
 
-        return result_icp
+    #     return result_icp
 
     def update_pose_using_icp(self, depth_im):
-        # curr_pcd = utils.create_pcd(depth_im, self.cfg['cam_intr'])
+        im_h, im_w = depth_im.shape
+        curr_pcd = utils.create_pcd(depth_im, cam_intr=self.cam_intr, depth_trunc=3)
+        curr_pcd_t = o3d.t.geometry.PointCloud.from_legacy(curr_pcd)
 
-        depth_im= cph.geometry.Image(depth_im)
-        cam_intr = cph.camera.PinholeCameraIntrinsic()
-        cam_intr.intrinsic_matrix = self.cfg['cam_intr']
-        curr_pcd = cph.geometry.PointCloud.create_from_depth_image(depth_im, cam_intr)
-
-        # #------------------------------ frame to frame ICP (open loop) ------------------------------
-        # open_loop_fitness = 0
-        # result_icp = self.multiscale_icp(self.prev_pcd, curr_pcd,
-        #                                  voxel_size_list=[0.025, 0.01, 0.005],
-        #                                  max_iter_list=[10, 10, 10], init=np.eye(4))
-        # if result_icp is not None:
-        #     self.transformation = result_icp.transformation @ self.transformation
-
-        #------------------------------ model to frame ICP (closed loop) ------------------------------
         cam_pose = la.inv(self.transformation)
-        rendered_depth, _ = self.tsdf_volume.ray_casting(self.cfg['im_w'], self.cfg['im_h'], self.cfg['cam_intr'],
-                                                         cam_pose, to_host=True)
-        # rendered_pcd = utils.create_pcd(rendered_depth, self.cfg['cam_intr'])
+        rendered_depth, _ = self.tsdf_volume.ray_casting(im_w, im_h, self.cam_intr, cam_pose, to_host=True)
 
-        rendered_depth = cph.geometry.Image(rendered_depth)
-        rendered_pcd = cph.geometry.PointCloud.create_from_depth_image(rendered_depth, cam_intr)
-        result_icp = self.multiscale_icp(rendered_pcd,
-                                         curr_pcd,
-                                         voxel_size_list=[0.025, 0.01],
-                                         max_iter_list=[5, 10])
+        rendered_depth = o3d.geometry.Image(rendered_depth)
+        rendered_pcd = utils.create_pcd(rendered_depth, cam_intr=self.cam_intr, depth_trunc=1.5)
+        rendered_pcd_t = o3d.t.geometry.PointCloud.from_legacy(rendered_pcd)
+
+        rendered_pcd_t = rendered_pcd_t.cuda()
+        curr_pcd_t = curr_pcd_t.cuda()
+
+        treg = o3d.t.pipelines.registration
+        tic = time.time()
+        result_icp = treg.multi_scale_icp(
+            rendered_pcd_t,
+            curr_pcd_t,
+            voxel_sizes=o3d.utility.DoubleVector([0.025, 0.01]),
+            criteria_list=[treg.ICPConvergenceCriteria(max_iteration=10) for _ in range(2)],
+            max_correspondence_distances=o3d.utility.DoubleVector([0.075, 0.03]),
+            init_source_to_target=o3d.core.Tensor.eye(4, o3d.core.Dtype.Float32),
+            estimation_method=treg.TransformationEstimationPointToPoint(),
+        )
+        # print(time.time() - tic)
+
+        delta_transformation = result_icp.transformation.numpy()
+
         if result_icp is None:
             return False
-
-        self.transformation = result_icp.transformation @ self.transformation
-        self.prev_observation = curr_pcd
+        
+        self.transformation = delta_transformation @ self.transformation
+        self.prev_pcd = curr_pcd_t
         return True
 
     def update(self, color_im, depth_im):
