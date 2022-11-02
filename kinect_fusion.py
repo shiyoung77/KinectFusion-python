@@ -29,18 +29,24 @@ class KinectFusion:
 
         cam_pose = la.inv(plane_frame)
         transformed_pcd = copy.deepcopy(pcd).transform(la.inv(plane_frame))
-        transformed_pts = np.asarray(transformed_pcd.points)
+        transformed_pts = np.array(transformed_pcd.points)
+        transformed_pts = transformed_pts[transformed_pts[:, 2] > -0.05]
 
         vol_bnds = np.zeros((3, 2), dtype=np.float32)
-        vol_bnds[:, 0] = transformed_pts.min(0)
-        vol_bnds[:, 1] = transformed_pts.max(0)
-        vol_bnds[2] = [-0.01, 0.45]
+        vol_bnds[:, 0] = transformed_pts.min(0) - 1
+        vol_bnds[:, 1] = transformed_pts.max(0) + 1
+        vol_bnds[2] = [-0.1, 0.5]
 
         if visualize:
             vol_box = o3d.geometry.OrientedBoundingBox()
             vol_box.center = vol_bnds.mean(1)
             vol_box.extent = vol_bnds[:, 1] - vol_bnds[:, 0]
-            o3d.visualization.draw_geometries([vol_box, transformed_pcd])
+            vol_box.color = [1, 0, 0]
+            self.vol_box = vol_box
+            cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
+            world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
+            world_frame.transform(cam_pose)
+            o3d.visualization.draw_geometries([vol_box, transformed_pcd, world_frame, cam_frame])
 
         self.init_transformation = plane_frame.copy()
         self.transformation = plane_frame.copy()
@@ -150,4 +156,4 @@ class KinectFusion:
         surface = self.tsdf_volume.get_surface_cloud_marching_cubes(voxel_size=voxel_size)
         o3d.io.write_point_cloud(os.path.join(output_folder, 'recon.pcd'), surface)
         print(f"Results have been saved to {output_folder}.")
-
+        return surface

@@ -167,7 +167,7 @@ class TSDFVolume:
         tsdf_vol, color_vol, weight_vol = self.get_volume()
 
         # Marching cubes
-        verts, faces, normals, values = measure.marching_cubes_lewiner(tsdf_vol, level=0)
+        verts, faces, normals, values = measure.marching_cubes(tsdf_vol, level=0)
         verts_ind = np.round(verts).astype(int)
 
         # remove false surface
