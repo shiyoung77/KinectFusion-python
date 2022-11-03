@@ -1,0 +1,108 @@
+import os
+import json
+from time import perf_counter
+
+import numpy as np
+import cv2
+import torch
+from kornia.feature import LoFTR
+import matplotlib.pyplot as plt
+
+
+def feature_matching_SIFT(img1, img2, cam_intr):
+    # https://github.com/hsuanhauliu/structure-from-motion-with-OpenCV/blob/master/main.py
+    sift = cv2.SIFT_create()  # this is extremely fast ~1e-5
+    kp1, des1 = sift.detectAndCompute(img1, None)
+    kp2, des2 = sift.detectAndCompute(img2, None)
+
+    # use flann to perform feature matching
+    FLANN_INDEX_KDTREE = 0
+    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    search_params = dict(checks=50)
+
+    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    matches = flann.knnMatch(des1, des2, k=2)
+
+    # store all the good matches as per Lowe's ratio test.
+    good = []
+    for m, n in matches:
+        if m.distance < 0.7 * n.distance:
+            good.append(m)
+    
+    min_match_count = 10
+    if len(good) > min_match_count:
+        kp1 = np.float32([kp1[m.queryIdx].pt for m in good]).reshape(-1, 1, 2).squeeze()
+        kp2 = np.float32([kp2[m.trainIdx].pt for m in good]).reshape(-1, 1, 2).squeeze()
+
+    # https://kornia-tutorials.readthedocs.io/en/latest/image_matching.html
+    # E, mask = cv2.findEssentialMat(kp1, kp2, cam_intr, cv2.USAC_MAGSAC, 0.999, 1.0)
+    E, mask = cv2.findEssentialMat(kp1, kp2, cam_intr, cv2.USAC_MAGSAC, 0.5, 0.999, 100000)
+
+    retVal, R, t, mask = cv2.recoverPose(E, kp1, kp2, mask=mask)
+    return R, t, mask, kp1, kp2
+
+
+def feature_matching_loftr(img1, img2, cam_intr, model=None, device="cuda:0"):
+    if model is None: 
+        model = LoFTR(pretrained="indoor").to(device)
+
+    img1gray = cv2.cvtColor(img1, cv2.COLOR_RGB2GRAY) / 255
+    img1gray = torch.from_numpy(img1gray).to(torch.float32).reshape(1, 1, *img1gray.shape).to(device)
+
+    img2gray = cv2.cvtColor(img2, cv2.COLOR_BGR2GRAY) / 255
+    img2gray = torch.from_numpy(img2gray).to(torch.float32).reshape(1, 1, *img2gray.shape).to(device)
+
+    input_dict = {"image0": img1gray, "image1": img2gray}
+    with torch.inference_mode():
+        tic = perf_counter()
+        correspondences = model(input_dict)
+        print(f"loftr takes: {perf_counter() - tic}s")
+
+    kp1 = correspondences['keypoints0'].cpu().numpy()
+    kp2 = correspondences['keypoints1'].cpu().numpy()
+
+    # https://kornia-tutorials.readthedocs.io/en/latest/image_matching.html
+    E, mask = cv2.findEssentialMat(kp1, kp2, cam_intr, cv2.USAC_MAGSAC, 0.5, 0.999, 100000)
+
+    retVal, R, t, mask = cv2.recoverPose(E, kp1, kp2, mask=mask)
+    return R, t, mask, kp1, kp2
+
+
+def visualize_matching(img1, img2, mask, kp1, kp2):
+    matchesMask = mask.ravel().tolist()
+    draw_params = dict(matchColor=(0, 255, 0),  # draw matches in green color
+                       singlePointColor=None,
+                       matchesMask=matchesMask,  # draw only inliers
+                       flags=2)
+    keypoints1 = [cv2.KeyPoint(pt[0], pt[1], 1) for pt in kp1]
+    keypoints2 = [cv2.KeyPoint(pt[0], pt[1], 1) for pt in kp2]
+    matches = [cv2.DMatch(i, i, 1) for i in range(len(kp1))]
+    img_vis = cv2.drawMatches(img1, keypoints1, img2, keypoints2, matches, None, **draw_params)
+    plt.imshow(img_vis)
+    plt.show()
+
+
+if __name__ == "__main__":
+    dataset = "/home/lsy/dataset/collected_videos/"
+    video = "kitchen_0002"
+
+    data_config_path = os.path.join(dataset, video, "config.json")
+    with open(data_config_path, 'r') as fp:
+        data_config = json.load(fp)
+    cam_intr = np.asarray(data_config['cam_intr'])
+
+    frame_id_1 = 0
+    frame_id_2 = 100
+
+    color_im_path = os.path.join(dataset, video, 'color', f"{frame_id_1:04d}-color.jpg")
+    img1 = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
+
+    color_im_path = os.path.join(dataset, video, 'color', f"{frame_id_2:04d}-color.jpg")
+    img2 = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
+
+    loftr = LoFTR(pretrained="indoor").cuda()
+    R, t, mask, kp1, kp2 = feature_matching_SIFT(img1, img2, cam_intr)
+    visualize_matching(img1, img2, mask, kp1, kp2)
+
+    R, t, mask, kp1, kp2 = feature_matching_loftr(img1, img2, cam_intr, loftr)
+    visualize_matching(img1, img2, mask, kp1, kp2)
