@@ -12,6 +12,7 @@ import open3d as o3d
 from .kinect_fusion import KinectFusion
 from .kf_config import get_config
 
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--dataset", type=str, default='/home/lsy/dataset/collected_videos')
@@ -51,25 +52,57 @@ if __name__ == '__main__':
     depth_im[depth_im > 2] = 0
     kf.initialize_tsdf_volume(color_im, depth_im, visualize=True)
 
-    # Update TSDF volume
     for frame_id in tqdm(range(args.start_frame + 1, end_frame + 1, args.stride)):
         color_im_path = os.path.join(video_folder, 'color', f'{frame_id:04d}-color.{args.color_im_ext}')
         depth_im_path = os.path.join(video_folder, 'depth', f'{frame_id:04d}-depth.png')
         color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
         depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
         depth_im[depth_im > args.depth_trunc] = 0
-        kf.update(color_im, depth_im)
-    
-    cam_poses = np.stack(kf.cam_poses)
+        kf.update_pose(color_im, depth_im)
+
+    print(len(list(range(args.start_frame + 1, end_frame + 1, args.stride))))
+    print(kf.pose_graph)
+    kf.optimize_pose_graph()
+
     cam_frames = []
-    for pose in cam_poses:
+    for pose in kf.cam_poses:
         cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
         cam_frame.transform(pose)
         cam_frames.append(cam_frame)
-
     recon = kf.tsdf_volume.get_surface_cloud_marching_cubes(voxel_size=0.005)
     o3d.visualization.draw_geometries([kf.vol_box, recon] + cam_frames)
 
-    if args.save:
-        output_dir = os.path.join(video_folder, 'recon')
-        recon_pcd = kf.save(output_dir, voxel_size=0.005)
+    opt_cam_frames = []
+    for i, frame_id in enumerate(tqdm(range(args.start_frame, end_frame + 1, args.stride))):
+        node = kf.pose_graph.nodes[i]
+        cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+        cam_frame.transform(node.pose)
+        opt_cam_frames.append(cam_frame)
+
+        color_im_path = os.path.join(video_folder, 'color', f'{frame_id:04d}-color.{args.color_im_ext}')
+        depth_im_path = os.path.join(video_folder, 'depth', f'{frame_id:04d}-depth.png')
+        color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
+        depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
+        depth_im[depth_im > args.depth_trunc] = 0
+        kf.opt_tsdf_volume.integrate(color_im, depth_im, kf.cfg['cam_intr'], node.pose)
+
+    opt_recon = kf.opt_tsdf_volume.get_surface_cloud_marching_cubes(voxel_size=0.005)
+    o3d.visualization.draw_geometries([kf.vol_box, opt_recon] + opt_cam_frames)
+
+    o3d.visualization.draw_geometries([kf.vol_box] + cam_frames + opt_cam_frames)
+
+    # Update TSDF volume
+    # for frame_id in tqdm(range(args.start_frame + 1, end_frame + 1, args.stride)):
+    #     color_im_path = os.path.join(video_folder, 'color', f'{frame_id:04d}-color.{args.color_im_ext}')
+    #     depth_im_path = os.path.join(video_folder, 'depth', f'{frame_id:04d}-depth.png')
+    #     color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
+    #     depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
+    #     depth_im[depth_im > args.depth_trunc] = 0
+    #     kf.update(color_im, depth_im)
+    
+    # recon = kf.tsdf_volume.get_surface_cloud_marching_cubes(voxel_size=0.005)
+    # o3d.visualization.draw_geometries([kf.vol_box, recon] + cam_frames)
+
+    # if args.save:
+    #     output_dir = os.path.join(video_folder, 'recon')
+    #     recon_pcd = kf.save(output_dir, voxel_size=0.005)

@@ -2,6 +2,7 @@ import time
 import copy
 from collections import deque
 import open3d as o3d
+import cupoch as cph
 import numpy as np
 from numba import njit, prange
 import scipy.linalg as la
@@ -19,6 +20,33 @@ def timeit(f, n=1, need_compile=False):
         return result
     return wrapper
 
+
+def create_pcd_cph(depth_im: np.ndarray,
+                   cam_intr: np.ndarray,
+                   color_im: np.ndarray = None,
+                   depth_scale: float = 1,
+                   depth_trunc: float = 3,
+                   cam_extr: np.ndarray = None):
+    intrinsic = cph.camera.PinholeCameraIntrinsic()
+    intrinsic.intrinsic_matrix = np.asarray(cam_intr)
+    depth_im_cph = cph.geometry.Image(depth_im)
+    if cam_extr is None:
+        cam_extr = np.eye(4)
+    if color_im is not None:
+        color_im_cph = cph.geometry.Image(np.ascontiguousarray(color_im))
+        rgbd = cph.geometry.RGBDImage.create_from_color_and_depth(color=color_im_cph,
+                                                                  depth=depth_im_cph,
+                                                                  depth_scale=depth_scale,
+                                                                  depth_trunc=depth_trunc,
+                                                                  convert_rgb_to_intensity=False)
+        pcd = cph.geometry.PointCloud.create_from_rgbd_image(rgbd, intrinsic, extrinsic=cam_extr)
+    else:
+        pcd = cph.geometry.PointCloud.create_from_depth_image(depth=depth_im_cph,
+                                                              intrinsic=intrinsic,
+                                                              extrinsic=cam_extr,
+                                                              depth_scale=depth_scale,
+                                                              depth_trunc=depth_trunc)
+    return pcd
 
 def create_pcd(depth_im: np.ndarray,
                cam_intr: np.ndarray,
