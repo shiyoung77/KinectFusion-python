@@ -94,17 +94,27 @@ class KinectFusion:
             return KinectFusion.multiscale_icp(tgt, src, voxel_size_list, max_iter_list,
                                                init=la.inv(init), inverse=True)
 
+        assert np.all(sorted(voxel_size_list, key=lambda x: -x) == voxel_size_list),\
+            "voxel_size_list is not in descending order"
+
+        src = src.voxel_down_sample(voxel_size_list[-1])
+        tgt = tgt.voxel_down_sample(voxel_size_list[-1])
+        src.estimate_normals(cph.geometry.KDTreeSearchParamKNN(knn=30))
+        tgt.estimate_normals(cph.geometry.KDTreeSearchParamKNN(knn=30))
+
         transformation = init.astype(np.float32)
         result_icp = None
         for i, (voxel_size, max_iter) in enumerate(zip(voxel_size_list, max_iter_list)):
-            src_down = src.voxel_down_sample(voxel_size)
-            tgt_down = tgt.voxel_down_sample(voxel_size)
-
-            src_down.estimate_normals(cph.geometry.KDTreeSearchParamKNN(knn=30))
-            tgt_down.estimate_normals(cph.geometry.KDTreeSearchParamKNN(knn=30))
+            if i != len(voxel_size_list) - 1:
+                src_down = src.voxel_down_sample(voxel_size)
+                tgt_down = src.voxel_down_sample(voxel_size)
+            else:
+                src_down = src
+                tgt_down = tgt
 
             result_icp = reg.registration_icp(
-                src_down, tgt_down, max_correspondence_distance=voxel_size * 3,
+                src_down, tgt_down,
+                max_correspondence_distance=voxel_size * 3,
                 init=transformation,
                 estimation_method=reg.TransformationEstimationPointToPlane(),
                 criteria=reg.ICPConvergenceCriteria(max_iteration=max_iter)
