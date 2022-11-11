@@ -67,9 +67,9 @@ class KinectFusion:
                                       voxel_size=self.cfg['tsdf_voxel_size'],
                                       trunc_margin=self.cfg['tsdf_trunc_margin'])
         self.tsdf_volume.integrate(color_im, depth_im, self.cfg['cam_intr'], cam_pose)
-        self.opt_tsdf_volume = TSDFVolume(vol_bnds=vol_bnds,
-                                          voxel_size=self.cfg['tsdf_voxel_size'],
-                                          trunc_margin=self.cfg['tsdf_trunc_margin'])
+        # self.opt_tsdf_volume = TSDFVolume(vol_bnds=vol_bnds,
+        #                                   voxel_size=self.cfg['tsdf_voxel_size'],
+        #                                   trunc_margin=self.cfg['tsdf_trunc_margin'])
 
         self.prev_pcd = utils.create_pcd_cph(depth_im, self.cfg['cam_intr'], color_im)
         self.cam_poses.append(cam_pose)
@@ -81,7 +81,6 @@ class KinectFusion:
         keypoints, descriptions = extract_sift_keypoints(resized_color_im)
         self.keypoints.append(keypoints)
         self.descriptions.append(descriptions)
-
 
     @staticmethod
     def multiscale_icp(src: cph.geometry.PointCloud,
@@ -274,6 +273,7 @@ class KinectFusion:
         self.cam_poses.append(cam_pose)
         self.tsdf_volume.integrate(color_im, depth_im, self.cfg['cam_intr'], cam_pose, weight=1)
         self.valid_pose_indices.append(self.count)
+        self.prev_pcd = curr_pcd
 
     def save(self, output_folder, voxel_size=0.005):
         if os.path.exists(output_folder):

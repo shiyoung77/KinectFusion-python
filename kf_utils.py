@@ -7,11 +7,13 @@ import numpy as np
 from numba import njit, prange
 import scipy.linalg as la
 
+
 def timeit(f, n=1, need_compile=False):
     def wrapper(*args, **kwargs):
         if need_compile:  # ignore the first run if needs compile
             result = f(*args, **kwargs)
         print("------------------------------------------------------------------------")
+        result = None
         tic = time.time()
         for i in range(n):
             result = f(*args, **kwargs)
@@ -47,6 +49,7 @@ def create_pcd_cph(depth_im: np.ndarray,
                                                               depth_scale=depth_scale,
                                                               depth_trunc=depth_trunc)
     return pcd
+
 
 def create_pcd(depth_im: np.ndarray,
                cam_intr: np.ndarray,

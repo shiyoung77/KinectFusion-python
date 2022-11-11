@@ -392,7 +392,7 @@ source_module = SourceModule(
         );
         float normalize_const = sqrtf(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
 
-        // ray contains information of both direction and magnitute
+        // ray contains information of both direction and magnitude
         ray.x = voxel_size * ray.x / normalize_const;
         ray.y = voxel_size * ray.y / normalize_const;
         ray.z = voxel_size * ray.z / normalize_const;

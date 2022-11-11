@@ -6,6 +6,7 @@ from skimage import measure
 import pycuda.autoinit
 import pycuda.driver as cuda
 from pycuda import gpuarray
+from pycuda.tools import make_default_context
 
 from .cuda_kernels import source_module
 
@@ -18,6 +19,7 @@ class TSDFVolume:
             vol_bnds (ndarray): An ndarray of shape (3, 2). Specifies the xyz bounds (min/max) in meters.
             voxel_size (float): The volume discretization in meters.
         """
+        ctx = make_default_context()
         if vol_dim is not None and vol_origin is not None:
             self._vol_dim = vol_dim
             self._vol_origin = vol_origin
@@ -44,14 +46,15 @@ class TSDFVolume:
 
         # initialize tsdf values to be -1
         xyz = x_dim * y_dim * z_dim
-        self._tsdf_vol_gpu = gpuarray.zeros(shape=(xyz), dtype=np.float32) - 1
-        self._weight_vol_gpu = gpuarray.zeros(shape=(xyz), dtype=np.float32)
-        self._color_vol_gpu= gpuarray.zeros(shape=(xyz), dtype=np.float32)
+        self._tsdf_vol_gpu = gpuarray.zeros(shape=xyz, dtype=np.float32) - 1
+        self._weight_vol_gpu = gpuarray.zeros(shape=xyz, dtype=np.float32)
+        self._color_vol_gpu = gpuarray.zeros(shape=xyz, dtype=np.float32)
 
         # integrate function using PyCuda
         self._cuda_integrate = source_module.get_function("integrate")
         self._cuda_ray_casting = source_module.get_function("rayCasting")
         self._cuda_batch_ray_casting = source_module.get_function("batchRayCasting")
+        ctx.pop()
 
     def integrate(self, color_im, depth_im, cam_intr, cam_pose, weight=1.0):
         """ Integrate an RGB-D frame into the TSDF volume.
@@ -67,10 +70,12 @@ class TSDFVolume:
 
         # color image is always from host
         color_im = color_im.astype(np.float32)
-        color_im = np.floor(color_im[...,2]*self._color_const + color_im[...,1]*256 + color_im[...,0])
+        color_im = np.floor(color_im[..., 2] * self._color_const + color_im[..., 1] * 256 + color_im[..., 0])
 
         if isinstance(depth_im, np.ndarray):
             depth_im_gpu = gpuarray.to_gpu(depth_im.astype(np.float32))
+        else:
+            depth_im_gpu = depth_im
 
         self._cuda_integrate(
             self._tsdf_vol_gpu,
@@ -181,8 +186,8 @@ class TSDFVolume:
         # make normals point outwards (negative -> positive) direction
         back_verts = verts - normals
         forward_verts = verts + normals
-        back_verts = np.clip(back_verts, a_min=np.zeros(3), a_max=np.array(tsdf_vol.shape)-1)
-        forward_verts = np.clip(forward_verts, a_min=np.zeros(3), a_max=np.array(tsdf_vol.shape)-1)
+        back_verts = np.clip(back_verts, a_min=np.zeros(3), a_max=np.array(tsdf_vol.shape) - 1)
+        forward_verts = np.clip(forward_verts, a_min=np.zeros(3), a_max=np.array(tsdf_vol.shape) - 1)
         back_ind = np.round(back_verts).astype(int)
         forward_ind = np.round(forward_verts).astype(int)
 
@@ -190,13 +195,13 @@ class TSDFVolume:
         forward_val = tsdf_vol[forward_ind[:, 0], forward_ind[:, 1], forward_ind[:, 2]]
         normals[(forward_val - back_val) < 0] *= -1
 
-        verts = verts*self._voxel_size + self._vol_origin
+        verts = verts * self._voxel_size + self._vol_origin
 
         # Get vertex colors
         rgb_vals = color_vol[verts_ind[:, 0], verts_ind[:, 1], verts_ind[:, 2]]
         colors_b = np.floor(rgb_vals / self._color_const)
-        colors_g = np.floor((rgb_vals - colors_b*self._color_const) / 256)
-        colors_r = rgb_vals - colors_b*self._color_const - colors_g*256
+        colors_g = np.floor((rgb_vals - colors_b * self._color_const) / 256)
+        colors_r = rgb_vals - colors_b * self._color_const - colors_g * 256
         colors = np.floor(np.asarray([colors_r, colors_g, colors_b])).T
 
         surface_cloud = o3d.geometry.PointCloud()
@@ -209,7 +214,7 @@ class TSDFVolume:
     def get_conservative_volume(self, voxel_size=0.01):
         tsdf_vol, _, _ = self.get_volume()
         verts = np.vstack(np.where(tsdf_vol < -0.2)).T
-        verts = verts*self._voxel_size + self._vol_origin
+        verts = verts * self._voxel_size + self._vol_origin
 
         conservative_volume = o3d.geometry.PointCloud()
         conservative_volume.points = o3d.utility.Vector3dVector(verts)
@@ -218,14 +223,14 @@ class TSDFVolume:
 
     def save(self, output_path):
         np.savez_compressed(output_path,
-            vol_dim=self._vol_dim,
-            vol_origin=self._vol_origin,
-            voxel_size=self._voxel_size,
-            trunc_margin=self._trunc_margin,
-            tsdf_vol=self._tsdf_vol_gpu.get(),
-            weight_vol=self._weight_vol_gpu.get(),
-            color_vol=self._color_vol_gpu.get()
-        )
+                            vol_dim=self._vol_dim,
+                            vol_origin=self._vol_origin,
+                            voxel_size=self._voxel_size,
+                            trunc_margin=self._trunc_margin,
+                            tsdf_vol=self._tsdf_vol_gpu.get(),
+                            weight_vol=self._weight_vol_gpu.get(),
+                            color_vol=self._color_vol_gpu.get()
+                            )
         print(f"tsdf volume has been saved to: {output_path}")
 
     @classmethod
