@@ -87,7 +87,7 @@ def feature_matching_loftr(img1, img2, cam_intr, model=None, confidence_thresh=0
 def feature_extract_and_match_spsg(img0, img1, cam_intr, 
                                    nms_radius = 4, keypoint_threshold = 0.005, max_keypoints = 1024, 
                                    superglue = 'indoor', sinkhorn_iterations = 20, match_threshold = 0.2, 
-                                   device = 'cpu'):
+                                   device = "cuda:0"):
     config = {
     'superpoint': {
         'nms_radius': nms_radius,
