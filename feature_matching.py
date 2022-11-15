@@ -8,6 +8,7 @@ import cv2
 import torch
 from kornia.feature import LoFTR
 import matplotlib.pyplot as plt
+from spsg_models.matching import Matching
 
 
 def extract_sift_keypoints(img: np.ndarray):
@@ -82,6 +83,50 @@ def feature_matching_loftr(img1, img2, cam_intr, model=None, confidence_thresh=0
     except cv2.error:
         return np.eye(3), np.zeros(3), None, kp1, kp2
     return R, t, mask, kp1, kp2
+
+def feature_extract_and_match_spsg(img0, img1, cam_intr, 
+                                   nms_radius = 4, keypoint_threshold = 0.005, max_keypoints = 1024, 
+                                   superglue = 'indoor', sinkhorn_iterations = 20, match_threshold = 0.2, 
+                                   device = 'cpu'):
+    config = {
+    'superpoint': {
+        'nms_radius': nms_radius,
+        'keypoint_threshold': keypoint_threshold,
+        'max_keypoints': max_keypoints
+    },
+    'superglue': {
+        'weights': superglue,
+        'sinkhorn_iterations': sinkhorn_iterations,
+        'match_threshold': match_threshold,
+    }
+    }
+    
+    matching = Matching(config).eval().to(device)
+
+    # Perform the matching.
+    inp0 = torch.from_numpy(img0/255.).float()[None, None].to(device)
+    inp1 = torch.from_numpy(img1/255.).float()[None, None].to(device)
+    pred = matching({'image0': inp0, 'image1': inp1})
+    pred = {k: v[0].cpu().detach().numpy() for k, v in pred.items()}
+    kpts0, kpts1 = pred['keypoints0'], pred['keypoints1']
+    matches, conf = pred['matches0'], pred['matching_scores0']
+
+    # Keep the matching keypoints.
+    valid = matches > -1
+    mkpts0 = kpts0[valid]
+    mkpts1 = kpts1[matches[valid]]
+    mconf = conf[valid]
+    
+    try:
+    # https://kornia-tutorials.readthedocs.io/en/latest/image_matching.html
+        E, mask = cv2.findEssentialMat(mkpts0, mkpts1, cameraMatrix=cam_intr, method=cv2.USAC_MAGSAC, prob=0.5,
+                                       threshold=0.999, maxIters=100000)
+        _, R, t, mask = cv2.recoverPose(E, mkpts0, mkpts1, cameraMatrix=cam_intr, mask=mask)
+    except cv2.error:
+        return np.eye(3), np.zeros(3), None, mkpts0, mkpts1
+    return R, t, mask, mkpts0, mkpts1
+    
+    
 
 
 def visualize_matching(img1, img2, mask, kp1, kp2):
