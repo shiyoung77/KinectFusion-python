@@ -56,6 +56,9 @@ class TSDFVolume:
         self._cuda_batch_ray_casting = source_module.get_function("batchRayCasting")
         ctx.pop()
 
+        # load and save
+        self._depth_scale = 1000
+
     def integrate(self, color_im, depth_im, cam_intr, cam_pose, weight=1.0):
         """ Integrate an RGB-D frame into the TSDF volume.
 
@@ -168,7 +171,7 @@ class TSDFVolume:
         weight_vol_cpu = self._weight_vol_gpu.get().reshape((z_dim, y_dim, x_dim)).transpose(2, 1, 0)
         return tsdf_vol_cpu, color_vol_cpu, weight_vol_cpu
 
-    def get_surface_cloud_marching_cubes(self, voxel_size=0.005):
+    def get_surface_cloud_marching_cubes(self):
         tsdf_vol, color_vol, weight_vol = self.get_volume()
 
         # Marching cubes
@@ -208,7 +211,6 @@ class TSDFVolume:
         surface_cloud.points = o3d.utility.Vector3dVector(verts)
         surface_cloud.colors = o3d.utility.Vector3dVector(colors / 255)
         surface_cloud.normals = o3d.utility.Vector3dVector(normals)
-        surface_cloud = surface_cloud.voxel_down_sample(voxel_size=voxel_size)
         return surface_cloud
 
     def get_conservative_volume(self, voxel_size=0.01):
@@ -227,9 +229,9 @@ class TSDFVolume:
                             vol_origin=self._vol_origin,
                             voxel_size=self._voxel_size,
                             trunc_margin=self._trunc_margin,
-                            tsdf_vol=self._tsdf_vol_gpu.get(),
-                            weight_vol=self._weight_vol_gpu.get(),
-                            color_vol=self._color_vol_gpu.get()
+                            tsdf_vol=(self._tsdf_vol_gpu.get() * self._depth_scale).astype(np.int16),
+                            weight_vol=(self._weight_vol_gpu.get()).astype(np.uint16),
+                            color_vol=(self._color_vol_gpu.get()).astype(np.uint32)
                             )
         print(f"tsdf volume has been saved to: {output_path}")
 
@@ -244,8 +246,8 @@ class TSDFVolume:
         obj = cls(voxel_size=loaded['voxel_size'], vol_bnds=loaded.get('vol_bounds'),
                   vol_dim=loaded.get('vol_dim'), vol_origin=loaded.get('vol_origin'),
                   trunc_margin=loaded['trunc_margin'])
-        obj._tsdf_vol_gpu = gpuarray.to_gpu(loaded['tsdf_vol'])
-        obj._weight_vol_gpu = gpuarray.to_gpu(loaded['weight_vol'])
-        obj._color_vol_gpu = gpuarray.to_gpu(loaded['color_vol'])
+        obj._tsdf_vol_gpu = gpuarray.to_gpu((loaded['tsdf_vol'].astype(np.float32)) / obj._depth_scale)
+        obj._weight_vol_gpu = gpuarray.to_gpu(loaded['weight_vol'].astype(np.float32))
+        obj._color_vol_gpu = gpuarray.to_gpu(loaded['color_vol'].astype(np.float32))
         print(f"tsdf volume has been loaded from: {input_path}")
         return obj

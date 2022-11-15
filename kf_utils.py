@@ -122,10 +122,12 @@ def plane_detection_o3d(pcd: o3d.geometry.PointCloud,
     outlier_cloud = pcd.select_by_index(inliers, invert=True)
     max_inlier_ratio = len(inliers) / len(np.asarray(pcd.points))
 
-    random_pt = np.asarray(inlier_cloud.points)[np.random.randint(len(inliers))]
-    x, y, z = random_pt
-    origin = np.array([x, y, (-d - a*x - b*y) / (c + 1e-8)])
-
+    # sample the inlier point that is closest to the camera origin as the world origin
+    inlier_pts = np.asarray(inlier_cloud.points)
+    squared_distances = np.sum(inlier_pts**2, axis=1)
+    closest_index = np.argmin(squared_distances)
+    x, y, z = inlier_pts[closest_index]
+    origin = np.array([x, y, (-d - a*x - b*y) / (c + 1e-12)])
     plane_normal = np.array([a, b, c])
     plane_normal /= np.linalg.norm(plane_normal)
 

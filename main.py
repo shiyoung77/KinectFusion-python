@@ -68,12 +68,12 @@ if __name__ == '__main__':
         cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
         cam_frame.transform(cam_pose)
         cam_frames.append(cam_frame)
-    recon = kf.tsdf_volume.get_surface_cloud_marching_cubes(voxel_size=0.005)
+    recon = kf.tsdf_volume.get_surface_cloud_marching_cubes()
     o3d.visualization.draw_geometries([kf.vol_box, recon] + cam_frames)
 
     if args.save:
         output_dir = os.path.join(video_folder, 'recon')
-        recon_pcd = kf.save(output_dir, voxel_size=0.005)
+        recon_pcd = kf.save(output_dir)
 
     """
     for frame_id in tqdm(range(args.start_frame + 1, end_frame + 1, args.stride)):

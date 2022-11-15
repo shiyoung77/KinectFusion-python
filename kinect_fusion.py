@@ -34,10 +34,10 @@ class KinectFusion:
     def initialize_tsdf_volume(self, color_im, depth_im, visualize=False):
         pcd = utils.create_pcd(depth_im, self.cfg['cam_intr'], color_im, depth_trunc=3)
 
-        plane_frame, inlier_ratio = utils.timeit(utils.plane_detection_o3d)(pcd,
-                                                                            max_iterations=500,
-                                                                            inlier_thresh=0.005,
-                                                                            visualize=False)
+        plane_frame, inlier_ratio = utils.plane_detection_o3d(pcd,
+                                                              max_iterations=1000,
+                                                              inlier_thresh=0.005,
+                                                              visualize=False)
         cam_pose = la.inv(plane_frame)
         transformed_pcd = copy.deepcopy(pcd).transform(la.inv(plane_frame))
         transformed_pts = np.array(transformed_pcd.points)
@@ -45,6 +45,7 @@ class KinectFusion:
 
         vol_bnds = np.zeros((3, 2), dtype=np.float32)
         vol_bnds[:, 0] = transformed_pts.min(0) - 1
+        vol_bnds[1, 0] += 0.8
         vol_bnds[:, 1] = transformed_pts.max(0) + 1
         vol_bnds[2] = [-0.2, 0.5]
 
@@ -76,11 +77,11 @@ class KinectFusion:
         self.valid_pose_indices.append(self.count)
 
         # extract SIFT keypoints and their descriptions (features)
-        H, W, _ = color_im.shape
-        resized_color_im = cv2.resize(color_im, (W//2, H//2), cv2.INTER_CUBIC)
-        keypoints, descriptions = extract_sift_keypoints(resized_color_im)
-        self.keypoints.append(keypoints)
-        self.descriptions.append(descriptions)
+        # H, W, _ = color_im.shape
+        # resized_color_im = cv2.resize(color_im, (W//2, H//2), cv2.INTER_CUBIC)
+        # keypoints, descriptions = extract_sift_keypoints(resized_color_im)
+        # self.keypoints.append(keypoints)
+        # self.descriptions.append(descriptions)
 
     @staticmethod
     def multiscale_icp(src: cph.geometry.PointCloud,
@@ -273,7 +274,8 @@ class KinectFusion:
 
         # sanity check
         translation_distance = la.norm(delta_t)
-        rotation_distance = np.arccos((np.trace(delta_R) - 1) / 2)
+        factor = np.clip((np.trace(delta_R) - 1) / 2, a_min=-1, a_max=1)
+        rotation_distance = np.arccos(factor)
         if translation_distance > 0.1 or rotation_distance > np.pi / 6:
             print("Sanity check fail, no integration.")
             return False
@@ -285,7 +287,7 @@ class KinectFusion:
         self.valid_pose_indices.append(self.count)
         self.prev_pcd = curr_pcd
 
-    def save(self, output_folder, voxel_size=0.005):
+    def save(self, output_folder):
         if os.path.exists(output_folder):
             key = input(f"{output_folder} exists. Do you want to overwrite? (y/n)")
             while key.lower() not in ['y', 'n']:
@@ -301,7 +303,7 @@ class KinectFusion:
                             **self.cfg,
                             )
         self.tsdf_volume.save(os.path.join(output_folder, 'tsdf.npz'))
-        surface = self.tsdf_volume.get_surface_cloud_marching_cubes(voxel_size=voxel_size)
+        surface = self.tsdf_volume.get_surface_cloud_marching_cubes()
         o3d.io.write_point_cloud(os.path.join(output_folder, 'recon.pcd'), surface)
         print(f"Results have been saved to {output_folder}.")
         return surface
