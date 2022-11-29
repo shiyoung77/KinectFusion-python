@@ -392,7 +392,7 @@ source_module = SourceModule(
         );
         float normalize_const = sqrtf(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
 
-        // ray contains information of both direction and magnitute
+        // ray contains information of both direction and magnitude
         ray.x = voxel_size * ray.x / normalize_const;
         ray.y = voxel_size * ray.y / normalize_const;
         ray.z = voxel_size * ray.z / normalize_const;
@@ -451,12 +451,25 @@ source_module = SourceModule(
 
             // zero crossing from front
             if (prev_tsdf > 0 && curr_tsdf < 0 && curr_tsdf > -1) {
-                float3 p = make_float3(
+                float3 p_curr = make_float3(
                     vol_origin[0] + curr_voxel.x * voxel_size,
                     vol_origin[1] + curr_voxel.y * voxel_size,
                     vol_origin[2] + curr_voxel.z * voxel_size
                 );
-                float depth = inv_cam_pose[8]*p.x + inv_cam_pose[9]*p.y + inv_cam_pose[10]*p.z + inv_cam_pose[11];
+                float3 p_prev = make_float3(
+                    vol_origin[0] + prev_voxel.x * voxel_size,
+                    vol_origin[1] + prev_voxel.y * voxel_size,
+                    vol_origin[2] + prev_voxel.z * voxel_size
+                );
+                
+                float curr_depth = inv_cam_pose[8] * p_curr.x + inv_cam_pose[9] * p_curr.y + inv_cam_pose[10] * p_curr.z
+                                 + inv_cam_pose[11];
+                float prev_depth = inv_cam_pose[8] * p_prev.x + inv_cam_pose[9] * p_prev.y + inv_cam_pose[10] * p_prev.z
+                                 + inv_cam_pose[11];
+                
+                // linear interpolation
+                float alpha = prev_tsdf / (prev_tsdf - curr_tsdf);
+                float depth = alpha * prev_depth + (1 - alpha) * curr_depth;
                 depth_im[pixel_idx] = depth;
 
                 float r, g, b;

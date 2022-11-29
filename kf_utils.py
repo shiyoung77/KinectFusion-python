@@ -2,15 +2,18 @@ import time
 import copy
 from collections import deque
 import open3d as o3d
+import cupoch as cph
 import numpy as np
 from numba import njit, prange
 import scipy.linalg as la
+
 
 def timeit(f, n=1, need_compile=False):
     def wrapper(*args, **kwargs):
         if need_compile:  # ignore the first run if needs compile
             result = f(*args, **kwargs)
         print("------------------------------------------------------------------------")
+        result = None
         tic = time.time()
         for i in range(n):
             result = f(*args, **kwargs)
@@ -18,6 +21,34 @@ def timeit(f, n=1, need_compile=False):
         print(f"time elapsed: {total_time}s. Average running time: {total_time / n}s")
         return result
     return wrapper
+
+
+def create_pcd_cph(depth_im: np.ndarray,
+                   cam_intr: np.ndarray,
+                   color_im: np.ndarray = None,
+                   depth_scale: float = 1,
+                   depth_trunc: float = 3,
+                   cam_extr: np.ndarray = None):
+    intrinsic = cph.camera.PinholeCameraIntrinsic()
+    intrinsic.intrinsic_matrix = np.asarray(cam_intr)
+    depth_im_cph = cph.geometry.Image(depth_im)
+    if cam_extr is None:
+        cam_extr = np.eye(4)
+    if color_im is not None:
+        color_im_cph = cph.geometry.Image(np.ascontiguousarray(color_im))
+        rgbd = cph.geometry.RGBDImage.create_from_color_and_depth(color=color_im_cph,
+                                                                  depth=depth_im_cph,
+                                                                  depth_scale=depth_scale,
+                                                                  depth_trunc=depth_trunc,
+                                                                  convert_rgb_to_intensity=False)
+        pcd = cph.geometry.PointCloud.create_from_rgbd_image(rgbd, intrinsic, extrinsic=cam_extr)
+    else:
+        pcd = cph.geometry.PointCloud.create_from_depth_image(depth=depth_im_cph,
+                                                              intrinsic=intrinsic,
+                                                              extrinsic=cam_extr,
+                                                              depth_scale=depth_scale,
+                                                              depth_trunc=depth_trunc)
+    return pcd
 
 
 def create_pcd(depth_im: np.ndarray,
@@ -70,7 +101,7 @@ def batch_compute_iou(roi: np.ndarray, proposals: np.ndarray, iou_threshold=0.8)
 
         # compute the intersection over union by taking the intersection
         # area and dividing it by the sum of prediction + ground-truth
-        # areas - the interesection area
+        # areas - the intersection area
         iou = interArea / float(boxAArea + boxBArea - interArea)
         ious[i] = iou
     return ious
@@ -91,10 +122,12 @@ def plane_detection_o3d(pcd: o3d.geometry.PointCloud,
     outlier_cloud = pcd.select_by_index(inliers, invert=True)
     max_inlier_ratio = len(inliers) / len(np.asarray(pcd.points))
 
-    random_pt = np.asarray(inlier_cloud.points)[np.random.randint(len(inliers))]
-    x, y, z = random_pt
-    origin = np.array([x, y, (-d - a*x - b*y) / (c + 1e-8)])
-
+    # sample the inlier point that is closest to the camera origin as the world origin
+    inlier_pts = np.asarray(inlier_cloud.points)
+    squared_distances = np.sum(inlier_pts**2, axis=1)
+    closest_index = np.argmin(squared_distances)
+    x, y, z = inlier_pts[closest_index]
+    origin = np.array([x, y, (-d - a*x - b*y) / (c + 1e-12)])
     plane_normal = np.array([a, b, c])
     plane_normal /= np.linalg.norm(plane_normal)
 
@@ -134,6 +167,7 @@ def plane_detection_ransac(pcd: o3d.geometry.PointCloud,
         inlier_thresh (float): [inlier distance threshold between a point to a plain]
         max_iterations (int): [max number of iteration to perform for RANSAC]
         early_stop_thresh (float): [inlier ratio to stop RANSAC early]
+        visualize (bool): whether to visualize
     
     Return:
         frame (np.ndarray): [z_dir is the estimated plane normal towards the camera, x_dir and y_dir randomly sampled]
@@ -278,22 +312,3 @@ def get_view_frustum(depth_im, cam_intr, cam_pose):
     ])
     view_frust_pts = rigid_transform(view_frust_pts.T, cam_pose).T
     return view_frust_pts
-
-
-if __name__ == '__main__':
-    # roi = np.array([11, 30, 80, 90])
-    # pts = np.random.random((1000, 2)) * 50  # randomly sample top left points of bboxes
-    # proposals = np.hstack([pts, pts + 150])
-    # timed_batch_compute_iou = timeit(batch_compute_iou, n=1, need_compile=True)
-    # timed_batch_compute_iou(roi, proposals)
-
-    pcd = o3d.io.read_point_cloud('demo.pcd')
-    clusters = timeit(extract_euclidean_clusters)(pcd, search_radius=0.05)
-    print(len(clusters))
-    pcds = []
-    for cluster in clusters:
-        cluster_pcd = pcd.select_by_index(cluster)
-        color = np.random.random((3,))
-        cluster_pcd.paint_uniform_color(color)
-        pcds.append(cluster_pcd)
-    o3d.visualization.draw_geometries(pcds)
