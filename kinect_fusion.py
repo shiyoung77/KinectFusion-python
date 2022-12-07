@@ -174,3 +174,24 @@ class KinectFusion:
         o3d.io.write_point_cloud(os.path.join(output_folder, 'recon.pcd'), surface)
         print(f"Results have been saved to {output_folder}.")
         return surface
+
+    @classmethod
+    def load(cls, output_folder):
+        kf_results_path = os.path.join(output_folder, 'kf_results.npz')
+        tsdf_path = os.path.join(output_folder, 'tsdf.npz')
+        assert os.path.exists(tsdf_path), f"TSDF file is not found at: {tsdf_path}"
+        assert os.path.exists(kf_results_path), f"Fusion result file is not found at: {kf_results_path}"
+
+        kf_results = dict()
+        cam_poses = None
+        with np.load(kf_results_path) as data:
+            for key in data.files:
+                if key == "cam_poses":
+                    cam_poses = data["cam_poses"]
+                else:
+                    kf_results[key] = data[key]
+        kf = cls(cfg=kf_results)
+        kf.tsdf_volume = TSDFVolume.load(tsdf_path)
+        kf.cam_poses = cam_poses
+        kf.transformation = la.inv(cam_poses[-1])
+        return kf

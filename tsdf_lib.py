@@ -227,6 +227,7 @@ class TSDFVolume:
         np.savez_compressed(output_path,
                             vol_dim=self._vol_dim,
                             vol_origin=self._vol_origin,
+                            vol_bounds=self._vol_bnds,
                             voxel_size=self._voxel_size,
                             trunc_margin=self._trunc_margin,
                             tsdf_vol=(self._tsdf_vol_gpu.get() * self._depth_scale).astype(np.int16),
