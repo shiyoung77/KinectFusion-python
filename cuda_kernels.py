@@ -1,10 +1,8 @@
-import pycuda
-import pycuda.autoinit
-import pycuda.driver as cuda
-from pycuda.compiler import SourceModule
+import cupy as cp
 
-source_module = SourceModule(
-    """
+
+source_module = cp.RawModule(code=r"""
+extern "C"{
     #define _X (threadIdx.x + blockDim.x * blockIdx.x)
     #define _Y (threadIdx.y + blockDim.y * blockIdx.y)
     #define _Z (threadIdx.z + blockDim.z * blockIdx.z)
@@ -641,15 +639,4 @@ source_module = SourceModule(
         float b_diff = (float)obs_color[b_pixel_idx] - (float)rendered_color[b_pixel_idx];
         diff[pixel_idx] = sqrt(r_diff*r_diff + g_diff*g_diff + b_diff*b_diff);
     }
-    """
-)
-
-if __name__ == '__main__':
-    print(f"PyCUDA Version:", pycuda.VERSION)
-    device = cuda.Device(0)
-    print(f"GPU Name: {device.name()}")
-    print(f"CUDA Arch: {device.COMPUTE_CAPABILITY_MAJOR}.{device.COMPUTE_CAPABILITY_MINOR}")
-    print(f"Number of multiprocessor: {device.MULTIPROCESSOR_COUNT}")
-    print(f"Max block dim: x:{device.MAX_BLOCK_DIM_X}, y:{device.MAX_BLOCK_DIM_Y}, z:{device.MAX_BLOCK_DIM_Z}")
-    print(f"Max grid dim: x:{device.MAX_GRID_DIM_X}, y:{device.MAX_GRID_DIM_Y}, z:{device.MAX_GRID_DIM_Z}")
-
+}""")

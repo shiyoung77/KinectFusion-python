@@ -1,12 +1,8 @@
 import open3d as o3d
 import numpy as np
-import scipy.linalg as la
+import numpy.linalg as la
+import cupy as cp
 from skimage import measure
-
-import pycuda.autoinit
-import pycuda.driver as cuda
-from pycuda import gpuarray
-from pycuda.tools import make_default_context
 
 from .cuda_kernels import source_module
 
@@ -19,7 +15,6 @@ class TSDFVolume:
             vol_bnds (ndarray): An ndarray of shape (3, 2). Specifies the xyz bounds (min/max) in meters.
             voxel_size (float): The volume discretization in meters.
         """
-        ctx = make_default_context()
         if vol_dim is not None and vol_origin is not None:
             self._vol_dim = vol_dim
             self._vol_origin = vol_origin
@@ -46,18 +41,16 @@ class TSDFVolume:
 
         # initialize tsdf values to be -1
         xyz = x_dim * y_dim * z_dim
-        self._tsdf_vol_gpu = gpuarray.zeros(shape=xyz, dtype=np.float32) - 1
-        self._weight_vol_gpu = gpuarray.zeros(shape=xyz, dtype=np.float32)
-        self._color_vol_gpu = gpuarray.zeros(shape=xyz, dtype=np.float32)
+        self._tsdf_vol_gpu = cp.zeros(shape=xyz, dtype=cp.float32) - 1
+        self._weight_vol_gpu = cp.zeros(shape=xyz, dtype=cp.float32)
+        self._color_vol_gpu = cp.zeros(shape=xyz, dtype=cp.float32)
 
         # integrate function using PyCuda
         self._cuda_integrate = source_module.get_function("integrate")
         self._cuda_ray_casting = source_module.get_function("rayCasting")
-        self._cuda_batch_ray_casting = source_module.get_function("batchRayCasting")
 
         # load and save
         self._depth_scale = 1000
-        ctx.pop()
 
     def integrate(self, color_im, depth_im, cam_intr, cam_pose, weight=1.0):
         """ Integrate an RGB-D frame into the TSDF volume.
@@ -75,100 +68,67 @@ class TSDFVolume:
         color_im = color_im.astype(np.float32)
         color_im = np.floor(color_im[..., 2] * self._color_const + color_im[..., 1] * 256 + color_im[..., 0])
 
-        if isinstance(depth_im, np.ndarray):
-            depth_im_gpu = gpuarray.to_gpu(depth_im.astype(np.float32))
-        else:
-            depth_im_gpu = depth_im
-
         self._cuda_integrate(
-            self._tsdf_vol_gpu,
-            self._weight_vol_gpu,
-            self._color_vol_gpu,
-            cuda.InOut(self._vol_dim.astype(np.int32)),
-            cuda.InOut(self._vol_origin.astype(np.float32)),
-            np.float32(self._voxel_size),
-            cuda.InOut(cam_intr.reshape(-1).astype(np.float32)),
-            cuda.InOut(cam_pose.reshape(-1).astype(np.float32)),
-            np.int32(im_h),
-            np.int32(im_w),
-            cuda.InOut(color_im.astype(np.float32)),
-            depth_im_gpu,
-            np.float32(self._trunc_margin),
-            np.float32(weight),
-            block=(self.block_x, self.block_y, self.block_z),
-            grid=(self.grid_x, self.grid_y, self.grid_z)
+            (self.grid_x, self.grid_y, self.grid_z),
+            (self.block_x, self.block_y, self.block_z),
+            (
+                self._tsdf_vol_gpu,
+                self._weight_vol_gpu,
+                self._color_vol_gpu,
+                cp.asarray(self._vol_dim.astype(np.int32)),
+                cp.asarray(self._vol_origin.astype(np.float32)),
+                cp.float32(self._voxel_size),
+                cp.asarray(cam_intr.reshape(-1).astype(np.float32)),
+                cp.asarray(cam_pose.reshape(-1).astype(np.float32)),
+                cp.int32(im_h),
+                cp.int32(im_w),
+                cp.asarray(color_im.astype(np.float32)),
+                cp.asarray(depth_im.astype(np.float32)),
+                cp.float32(self._trunc_margin),
+                cp.float32(weight),
+            )
         )
-
-    def batch_ray_casting(self, im_w, im_h, cam_intr, cam_poses, inv_cam_poses, start_row=0, start_col=0,
-                          batch_size=1, to_host=True):
-        batch_color_im_gpu = gpuarray.zeros(shape=(batch_size, 3, im_h, im_w), dtype=np.uint8)
-        batch_depth_im_gpu = gpuarray.zeros(shape=(batch_size, im_h, im_w), dtype=np.float32)
-
-        self._cuda_batch_ray_casting(
-            self._tsdf_vol_gpu,
-            self._color_vol_gpu,
-            self._weight_vol_gpu,
-            cuda.InOut(self._vol_dim.astype(np.int32)),
-            cuda.InOut(self._vol_origin.astype(np.float32)),
-            np.float32(self._voxel_size),
-            cuda.InOut(cam_intr.reshape(-1).astype(np.float32)),
-            cuda.InOut(cam_poses.reshape(-1).astype(np.float32)),
-            cuda.InOut(inv_cam_poses.reshape(-1).astype(np.float32)),
-            np.int32(start_row),
-            np.int32(start_col),
-            np.int32(im_h),
-            np.int32(im_w),
-            batch_color_im_gpu,
-            batch_depth_im_gpu,
-            np.int32(batch_size),
-            block=(8, 8, 16),
-            grid=(int(np.ceil(im_w / 8)), int(np.ceil(im_h / 8)), int(np.ceil(batch_size / 16)))
-        )
-        if not to_host:
-            return batch_depth_im_gpu, batch_color_im_gpu
-
-        batch_depth_im = batch_depth_im_gpu.get()
-        batch_color_im = batch_color_im_gpu.get().transpose(0, 2, 3, 1)  # b, h, w, c
-        return batch_depth_im, batch_color_im
 
     def ray_casting(self, im_w, im_h, cam_intr, cam_pose, start_row=0, start_col=0, to_host=True):
         """
         Render an image patch
         """
-        depth_im_gpu = gpuarray.zeros(shape=(im_h, im_w), dtype=np.float32)
-        color_im_gpu = gpuarray.zeros(shape=(3, im_h, im_w), dtype=np.uint8)
+        depth_im_gpu = cp.zeros((im_h, im_w), dtype=np.float32)
+        color_im_gpu = cp.zeros((3, im_h, im_w), dtype=np.uint8)
 
         self._cuda_ray_casting(
-            self._tsdf_vol_gpu,
-            self._color_vol_gpu,
-            self._weight_vol_gpu,
-            cuda.InOut(self._vol_dim.astype(np.int32)),
-            cuda.InOut(self._vol_origin.astype(np.float32)),
-            np.float32(self._voxel_size),
-            cuda.InOut(cam_intr.reshape(-1).astype(np.float32)),
-            cuda.InOut(cam_pose.reshape(-1).astype(np.float32)),
-            cuda.InOut(la.inv(cam_pose).reshape(-1).astype(np.float32)),
-            np.int32(start_row),
-            np.int32(start_col),
-            np.int32(im_h),
-            np.int32(im_w),
-            color_im_gpu,
-            depth_im_gpu,
-            block=(32, 32, 1),
-            grid=(int(np.ceil(im_w / 32)), int(np.ceil(im_h / 32)), 1)
+            (int(np.ceil(im_w / 32)), int(np.ceil(im_h / 32)), 1),
+            (32, 32, 1),
+            (
+                self._tsdf_vol_gpu,
+                self._color_vol_gpu,
+                self._weight_vol_gpu,
+                cp.asarray(self._vol_dim.astype(np.int32)),
+                cp.asarray(self._vol_origin.astype(np.float32)),
+                cp.float32(self._voxel_size),
+                cp.asarray(cam_intr.reshape(-1).astype(np.float32)),
+                cp.asarray(cam_pose.reshape(-1).astype(np.float32)),
+                cp.asarray(la.inv(cam_pose).reshape(-1).astype(np.float32)),
+                cp.int32(start_row),
+                cp.int32(start_col),
+                cp.int32(im_h),
+                cp.int32(im_w),
+                color_im_gpu,
+                depth_im_gpu,
+            )
         )
         if not to_host:
             return depth_im_gpu, color_im_gpu
 
-        depth_im = depth_im_gpu.get()
-        color_im = color_im_gpu.get().transpose(1, 2, 0)
+        depth_im = cp.asnumpy(depth_im_gpu)
+        color_im = cp.asnumpy(color_im_gpu).transpose(1, 2, 0)
         return depth_im, color_im
 
     def get_volume(self):
         x_dim, y_dim, z_dim = self._vol_dim
-        tsdf_vol_cpu = self._tsdf_vol_gpu.get().reshape((z_dim, y_dim, x_dim)).transpose(2, 1, 0)
-        color_vol_cpu = self._color_vol_gpu.get().reshape((z_dim, y_dim, x_dim)).transpose(2, 1, 0)
-        weight_vol_cpu = self._weight_vol_gpu.get().reshape((z_dim, y_dim, x_dim)).transpose(2, 1, 0)
+        tsdf_vol_cpu = cp.asnumpy(self._tsdf_vol_gpu).reshape((z_dim, y_dim, x_dim)).transpose(2, 1, 0)
+        color_vol_cpu = cp.asnumpy(self._color_vol_gpu).reshape((z_dim, y_dim, x_dim)).transpose(2, 1, 0)
+        weight_vol_cpu = cp.asnumpy(self._weight_vol_gpu).reshape((z_dim, y_dim, x_dim)).transpose(2, 1, 0)
         return tsdf_vol_cpu, color_vol_cpu, weight_vol_cpu
 
     def get_surface_cloud_marching_cubes(self):
@@ -247,8 +207,8 @@ class TSDFVolume:
         obj = cls(voxel_size=loaded['voxel_size'], vol_bnds=loaded.get('vol_bounds'),
                   vol_dim=loaded.get('vol_dim'), vol_origin=loaded.get('vol_origin'),
                   trunc_margin=loaded['trunc_margin'])
-        obj._tsdf_vol_gpu = gpuarray.to_gpu((loaded['tsdf_vol'].astype(np.float32)) / obj._depth_scale)
-        obj._weight_vol_gpu = gpuarray.to_gpu(loaded['weight_vol'].astype(np.float32))
-        obj._color_vol_gpu = gpuarray.to_gpu(loaded['color_vol'].astype(np.float32))
+        obj._tsdf_vol_gpu = cp.asarray((loaded['tsdf_vol'].astype(np.float32)) / obj._depth_scale)
+        obj._weight_vol_gpu = cp.asarray(loaded['weight_vol'].astype(np.float32))
+        obj._color_vol_gpu = cp.asarray(loaded['color_vol'].astype(np.float32))
         print(f"tsdf volume has been loaded from: {input_path}")
         return obj

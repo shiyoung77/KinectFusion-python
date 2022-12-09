@@ -2,7 +2,7 @@ import os
 import copy
 
 import numpy as np
-import scipy.linalg as la
+import numpy.linalg as la
 import open3d as o3d
 import cupoch as cph
 from cupoch import registration as reg
