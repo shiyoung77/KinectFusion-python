@@ -18,7 +18,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--dataset", type=str, default='/home/lsy/dataset/collected_videos')
     parser.add_argument("-v", "--video", type=str, default="mocap_0001")
-    parser.add_argument("--color_im_ext", type=str, default="jpg")
     parser.add_argument("--start_frame", type=int, default=0)
     parser.add_argument("--end_frame", type=int, default=-1)
     parser.add_argument("--depth_trunc", type=float, default=1.5)
@@ -28,12 +27,14 @@ def main():
 
     video_folder = os.path.join(args.dataset, args.video)
     color_folder = os.path.join(video_folder, 'color')
-    frame_ids = sorted([int(i.split('-')[0]) for i in os.listdir(color_folder)])
+    if not os.path.isdir(color_folder):
+        print(f"{color_folder} doesn't exist.")
+        exit(1)
 
+    color_files = sorted(os.listdir(color_folder))
     if args.end_frame == -1:
-        end_frame = frame_ids[-1]
-    else:
-        end_frame = min(frame_ids[-1], args.end_frame)
+        args.end_frame = len(color_files)
+    color_files = color_files[args.start_frame:args.end_frame]
 
     data_cfg_path = os.path.join(video_folder, 'config.json')
     with open(data_cfg_path, 'r') as f:
@@ -47,17 +48,19 @@ def main():
     kf = KinectFusion(cfg=cfg)
 
     # initialize TSDF with the first frame
-    color_im_path = os.path.join(video_folder, 'color', f'{args.start_frame:04d}-color.{args.color_im_ext}')
-    depth_im_path = os.path.join(video_folder, 'depth', f'{args.start_frame:04d}-depth.png')
+    color_im_path = os.path.join(video_folder, 'color', f'{color_files[0]}')
+    prefix = color_files[0].split('-')[0]
+    depth_im_path = os.path.join(video_folder, 'depth', f'{prefix}-depth.png')
     color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
     depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
     depth_im[depth_im > 2] = 0
     kf.initialize_tsdf_volume(color_im, depth_im, visualize=True)
 
     # Update TSDF volume
-    for frame_id in tqdm(range(args.start_frame + 1, end_frame + 1, args.stride)):
-        color_im_path = os.path.join(video_folder, 'color', f'{frame_id:04d}-color.{args.color_im_ext}')
-        depth_im_path = os.path.join(video_folder, 'depth', f'{frame_id:04d}-depth.png')
+    for color_file in tqdm(color_files[1:]):
+        color_im_path = os.path.join(video_folder, 'color', f'{color_file}')
+        prefix = color_file.split('-')[0]
+        depth_im_path = os.path.join(video_folder, 'depth', f'{prefix}-depth.png')
         color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
         depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
         depth_im[depth_im > args.depth_trunc] = 0
