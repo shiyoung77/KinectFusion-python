@@ -448,7 +448,7 @@ extern "C"{
             float curr_tsdf = tsdf_vol[curr_voxel_idx];
 
             // zero crossing from front
-            if (prev_tsdf > 0 && curr_tsdf < 0 && curr_tsdf > -1) {
+            if (prev_tsdf >= 0 && curr_tsdf < 0 && curr_tsdf > -1) {
                 float3 p_curr = make_float3(
                     vol_origin[0] + curr_voxel.x * voxel_size,
                     vol_origin[1] + curr_voxel.y * voxel_size,
