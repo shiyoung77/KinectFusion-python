@@ -22,7 +22,7 @@ def main():
     parser.add_argument("--end_frame", type=int, default=-1)
     parser.add_argument("--depth_trunc", type=float, default=1.5)
     parser.add_argument("--stride", type=int, default=1)
-    parser.add_argument("-s", "--save", action="store_true")
+    parser.add_argument("--output_folder", type=str, default="reconstruction")
     args = parser.parse_args()
 
     video_folder = os.path.join(args.dataset, args.video)
@@ -68,14 +68,14 @@ def main():
 
     cam_frames = []
     for cam_pose in kf.cam_poses:
-        cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+        cam_frame = o3d.geometry.TriangleMesh().create_coordinate_frame(size=0.1)
         cam_frame.transform(cam_pose)
         cam_frames.append(cam_frame)
     recon = kf.tsdf_volume.get_surface_cloud_marching_cubes()
     o3d.visualization.draw_geometries([kf.vol_box, recon] + cam_frames)
 
-    if args.save:
-        output_dir = os.path.join(video_folder, 'recon')
+    if args.output_folder:
+        output_dir = os.path.join(video_folder, args.output_folder)
         kf.save(output_dir)
 
 
