@@ -57,22 +57,25 @@ def create_pcd(depth_im: np.ndarray,
                depth_scale: float = 1,
                depth_trunc: float = 1.5,
                cam_extr: np.ndarray = np.eye(4)):
-
     intrinsic_o3d = o3d.camera.PinholeCameraIntrinsic()
     intrinsic_o3d.intrinsic_matrix = cam_intr
     depth_im_o3d = o3d.geometry.Image(depth_im)
     if color_im is not None:
         color_im_o3d = o3d.geometry.Image(color_im)
-        rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(color_im_o3d, depth_im_o3d, 
-            depth_scale=depth_scale, depth_trunc=depth_trunc, convert_rgb_to_intensity=False)
-        pcd = o3d.geometry.PointCloud.create_from_rgbd_image(rgbd, intrinsic_o3d, extrinsic=cam_extr)
+        rgbd = o3d.geometry.RGBDImage().create_from_color_and_depth(color_im_o3d, depth_im_o3d,
+                                                                    depth_scale=depth_scale,
+                                                                    depth_trunc=depth_trunc,
+                                                                    convert_rgb_to_intensity=False)
+        pcd = o3d.geometry.PointCloud().create_from_rgbd_image(rgbd, intrinsic_o3d, extrinsic=cam_extr)
     else:
-        pcd = o3d.geometry.PointCloud.create_from_depth_image(depth_im_o3d, intrinsic_o3d, extrinsic=cam_extr,
-                                                              depth_scale=depth_scale, depth_trunc=depth_trunc)
+        pcd = o3d.geometry.PointCloud().create_from_depth_image(depth_im_o3d, intrinsic_o3d,
+                                                                extrinsic=cam_extr,
+                                                                depth_scale=depth_scale,
+                                                                depth_trunc=depth_trunc)
     return pcd
 
 
-@njit   # @njit(parallel=True) will be slower for whatever reason
+@njit  # @njit(parallel=True) will be slower for whatever reason
 def batch_compute_iou(roi: np.ndarray, proposals: np.ndarray, iou_threshold=0.8):
     """
     compute IoU between one roi and N proposals
@@ -124,10 +127,10 @@ def plane_detection_o3d(pcd: o3d.geometry.PointCloud,
 
     # sample the inlier point that is closest to the camera origin as the world origin
     inlier_pts = np.asarray(inlier_cloud.points)
-    squared_distances = np.sum(inlier_pts**2, axis=1)
+    squared_distances = np.sum(inlier_pts ** 2, axis=1)
     closest_index = np.argmin(squared_distances)
     x, y, z = inlier_pts[closest_index]
-    origin = np.array([x, y, (-d - a*x - b*y) / (c + 1e-12)])
+    origin = np.array([x, y, (-d - a * x - b * y) / (c + 1e-12)])
     plane_normal = np.array([a, b, c])
     plane_normal /= np.linalg.norm(plane_normal)
 
@@ -136,7 +139,7 @@ def plane_detection_o3d(pcd: o3d.geometry.PointCloud,
             plane_normal *= -1
     elif plane_normal[2] < 0:
         plane_normal *= -1
-    
+
     # randomly sample x_dir and y_dir given plane normal as z_dir
     x_dir = np.array([-plane_normal[2], 0, plane_normal[0]])
     x_dir /= la.norm(x_dir)
@@ -146,12 +149,12 @@ def plane_detection_o3d(pcd: o3d.geometry.PointCloud,
     plane_frame[:3, 1] = y_dir
     plane_frame[:3, 2] = plane_normal
     plane_frame[:3, 3] = origin
-    
+
     if visualize:
         plane_frame_vis = generate_coordinate_frame(plane_frame, scale=0.05)
         cam_frame_vis = generate_coordinate_frame(np.eye(4), scale=0.05)
         o3d.visualization.draw_geometries([inlier_cloud, outlier_cloud, plane_frame_vis, cam_frame_vis])
-    
+
     return plane_frame, max_inlier_ratio
 
 
@@ -203,7 +206,7 @@ def plane_detection_ransac(pcd: o3d.geometry.PointCloud,
 
         if inlier_ratio > early_stop_thresh:
             break
-    
+
     if plane_normal @ origin > 0:
         plane_normal *= -1
 
@@ -269,7 +272,7 @@ def extract_euclidean_clusters(pcd: o3d.geometry.PointCloud,
             pt_idx = queue.popleft()
             pt = pts[pt_idx]
             cluster.append(pt_idx)
-            
+
             # search_hybrid is much faster than search_radius
             _, neighbor_indices, _ = kd_tree.search_hybrid_vector_3d(pt, search_radius, max_nn=30)
             # _, neighbor_indices, _ = kd_tree.search_radius_vector_3d(pt, search_radius)
@@ -278,7 +281,7 @@ def extract_euclidean_clusters(pcd: o3d.geometry.PointCloud,
                 if not processed[neighbor_idx]:
                     queue.append(neighbor_idx)
                     processed[neighbor_idx] = True
-        
+
         if min_pts_per_cluster < len(cluster) < max_pts_per_cluster:
             clustered_indices.append(cluster)
 
@@ -306,9 +309,25 @@ def get_view_frustum(depth_im, cam_intr, cam_pose):
     im_w = depth_im.shape[1]
     max_depth = np.max(depth_im)
     view_frust_pts = np.array([
-        (np.array([0,0,0,im_w,im_w])-cam_intr[0,2])*np.array([0,max_depth,max_depth,max_depth,max_depth])/cam_intr[0,0],
-        (np.array([0,0,im_h,0,im_h])-cam_intr[1,2])*np.array([0,max_depth,max_depth,max_depth,max_depth])/cam_intr[1,1],
-        np.array([0,max_depth,max_depth,max_depth,max_depth])
+        (np.array([0, 0, 0, im_w, im_w]) - cam_intr[0, 2]) * np.array([0, max_depth, max_depth, max_depth, max_depth]) /
+        cam_intr[0, 0],
+        (np.array([0, 0, im_h, 0, im_h]) - cam_intr[1, 2]) * np.array([0, max_depth, max_depth, max_depth, max_depth]) /
+        cam_intr[1, 1],
+        np.array([0, max_depth, max_depth, max_depth, max_depth])
     ])
     view_frust_pts = rigid_transform(view_frust_pts.T, cam_pose).T
     return view_frust_pts
+
+
+def vis_pcd(pcd, cam_pose=None, coord_frame_size=0.2):
+    if not isinstance(pcd, list):
+        pcd = [pcd]
+    pcd_frame = o3d.geometry.TriangleMesh().create_coordinate_frame(size=coord_frame_size)
+    if cam_pose is not None:
+        cam_frame = o3d.geometry.TriangleMesh().create_coordinate_frame(size=coord_frame_size)
+        cam_frame.transform(cam_pose)
+        o3d.visualization.draw_geometries([*pcd, pcd_frame, cam_frame])
+    else:
+        o3d.visualization.draw_geometries([*pcd, pcd_frame])
+
+
