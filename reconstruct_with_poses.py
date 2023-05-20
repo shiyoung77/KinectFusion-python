@@ -19,14 +19,14 @@ from .kf_utils import create_pcd, vis_pcd
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-d", "--dataset", type=str, default='~/t7/custom_room')
-    parser.add_argument("-v", "--video", type=str, default="output8-Shiyang")
+    parser.add_argument("-v", "--video", type=str, default="lab_scan2-Shiyang")
     parser.add_argument("--start_frame", type=int, default=0)
     parser.add_argument("--end_frame", type=int, default=-1)
     parser.add_argument("--depth_trunc", type=float, default=1.5)
     parser.add_argument("--stride", type=int, default=1)
-    parser.add_argument("--tsdf_voxel_size", type=float, default=0.01)
-    parser.add_argument("--tsdf_trunc_margin", type=float, default=0.05)
-    parser.add_argument("--output_voxel_size", type=float, default=0.025)
+    parser.add_argument("--tsdf_voxel_size", type=float, default=0.015)
+    parser.add_argument("--tsdf_trunc_margin", type=float, default=0.1)
+    parser.add_argument("--output_voxel_size", type=float, default=0.02)
     parser.add_argument("--output_folder", type=str, default=".")
     args = parser.parse_args()
 
@@ -95,7 +95,11 @@ def main():
         prefix = color_file.split('-')[0]
         depth_im_path = str(video_folder / 'depth' / f'{prefix}-depth.png')
         color_im = cv2.cvtColor(cv2.imread(color_im_path), cv2.COLOR_BGR2RGB)
-        depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
+        try:
+            depth_im = cv2.imread(depth_im_path, cv2.IMREAD_UNCHANGED).astype(np.float32) / cfg['depth_scale']
+        except AttributeError:
+            print(f"Failed to read {depth_im_path}")
+            continue
         depth_im[depth_im > args.depth_trunc] = 0
 
         cam_pose_path = str(video_folder / 'poses' / f'{prefix}-pose.txt')
@@ -105,11 +109,11 @@ def main():
 
     scan = tsdf_volume.get_surface_cloud_marching_cubes()
     scan.transform(np.linalg.inv(extrinsic))
-    scan = scan.voxel_down_sample(args.output_voxel_size)
     vis_pcd(scan)
 
     output_path = video_folder / args.output_folder / f'scan-{args.output_voxel_size:.3f}.pcd'
-    o3d.io.write_point_cloud(str(output_path), scan)
+    scan_down = scan.voxel_down_sample(args.output_voxel_size)
+    o3d.io.write_point_cloud(str(output_path), scan_down)
     print(f"Output point cloud voxel size {args.output_voxel_size:.3f}m")
     print(f"Saved point cloud to {output_path}")
 
