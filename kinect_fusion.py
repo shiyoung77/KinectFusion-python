@@ -1,5 +1,6 @@
 import os
 import copy
+from pathlib import Path
 
 import numpy as np
 import numpy.linalg as la
@@ -35,10 +36,11 @@ class KinectFusion:
         transformed_pts = transformed_pts[transformed_pts[:, 2] > -0.05]
 
         vol_bnds = np.zeros((3, 2), dtype=np.float32)
-        vol_bnds[:, 0] = transformed_pts.min(0) - 0.3
-        vol_bnds[1, 0] += 0.3
-        vol_bnds[:, 1] = transformed_pts.max(0) + 0.3
-        vol_bnds[2] = [-0.1, 0.4]
+        vol_bnds[:, 0] = transformed_pts.min(0)
+        vol_bnds[:, 1] = transformed_pts.max(0)
+        vol_bnds[0] += self.cfg['bound_dx']
+        vol_bnds[1] += self.cfg['bound_dy']
+        vol_bnds[2] = self.cfg['bound_z']
 
         if visualize:
             vol_box = o3d.geometry.OrientedBoundingBox()
@@ -46,8 +48,8 @@ class KinectFusion:
             vol_box.extent = vol_bnds[:, 1] - vol_bnds[:, 0]
             vol_box.color = [1, 0, 0]
             self.vol_box = vol_box
-            cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
-            world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2)
+            cam_frame = o3d.geometry.TriangleMesh().create_coordinate_frame(size=0.2)
+            world_frame = o3d.geometry.TriangleMesh().create_coordinate_frame(size=0.2)
             world_frame.transform(cam_pose)
             o3d.visualization.draw_geometries([vol_box, transformed_pcd, world_frame, cam_frame])
 
@@ -133,9 +135,6 @@ class KinectFusion:
         # get current point cloud
         curr_pcd = utils.create_pcd_cph(depth_im, self.cfg['cam_intr'], color_im)
         result_icp = self.compute_model_to_frame_transformation(curr_pcd)
-        if result_icp is None:
-            return False
-
         delta_T = result_icp.transformation
         delta_R = delta_T[:3, :3]
         delta_t = delta_T[:3, 3]
@@ -146,6 +145,7 @@ class KinectFusion:
         rotation_distance = np.arccos(factor)
         if translation_distance > 0.1 or rotation_distance > np.pi / 6:
             print("Sanity check fail, no integration.")
+            self.cam_poses.append(np.full_like(self.cam_poses[-1], np.nan))
             return False
 
         self.transformation = delta_T @ self.transformation
@@ -153,26 +153,29 @@ class KinectFusion:
         self.cam_poses.append(cam_pose)
         self.tsdf_volume.integrate(color_im, depth_im, self.cfg['cam_intr'], cam_pose, weight=1)
         self.prev_pcd = curr_pcd
+        return True
 
-    def save(self, output_folder):
-        if os.path.exists(output_folder):
-            key = input(f"{output_folder} exists. Do you want to overwrite? (y/n)")
+    def save(self, output_folder, save_tsdf=False):
+        output_folder = Path(output_folder)
+        output_path = output_folder / 'kf_results.npz'
+        if output_path.exists():
+            key = input(f"{output_path} exists. Do you want to overwrite? (y/n)")
             while key.lower() not in ['y', 'n']:
-                key = input(f"{output_folder} exists. Do you want to overwrite? (y/n)")
+                key = input(f"{output_path} exists. Do you want to overwrite? (y/n)")
             if key.lower() == 'n':
                 return
         else:
-            os.makedirs(output_folder)
-
+            output_folder.mkdir(parents=True, exist_ok=True)
         cam_poses = np.stack(self.cam_poses)
-        np.savez_compressed(os.path.join(output_folder, 'kf_results.npz'),
-                            cam_poses=cam_poses,
-                            **self.cfg,
-                            )
-        self.tsdf_volume.save(os.path.join(output_folder, 'tsdf.npz'))
+        np.savez_compressed(output_path, cam_poses=cam_poses, **self.cfg)
+
+        output_path = output_folder / 'scan.pcd'
         surface = self.tsdf_volume.get_surface_cloud_marching_cubes()
-        o3d.io.write_point_cloud(os.path.join(output_folder, 'recon.pcd'), surface)
-        print(f"Results have been saved to {output_folder}.")
+        o3d.io.write_point_cloud(str(output_path), surface)
+
+        if save_tsdf:
+            output_path = output_folder / 'tsdf.npz'
+            self.tsdf_volume.save(output_path)
         return surface
 
     @classmethod

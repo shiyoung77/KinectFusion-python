@@ -6,6 +6,9 @@ def get_config():
     config['tsdf_voxel_size'] = 0.003  # in meter
     config['tsdf_trunc_margin'] = 0.015  # in meter
     config['pcd_voxel_size'] = 0.005  # in meter
+    config['bound_dx'] = [-0.2, 0.2]  # in meter
+    config['bound_dy'] = [-0.2, 0.4]  # in meter
+    config['bound_z'] = [-0.1, 0.7]  # in meter
     return config
 
 
@@ -18,5 +21,4 @@ def print_config(cfg):
 
 
 if __name__ == '__main__':
-    cfg = get_config()
-    print_config(cfg)
+    print_config(get_config())
