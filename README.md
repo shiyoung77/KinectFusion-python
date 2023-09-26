@@ -62,7 +62,7 @@ config.json should contain the camera information. An example config.json is as 
     ]
 }
 ```
-An example RGB-D video capture at Rutgers CS Robotics Lab could be found at this [google drive link](https://drive.google.com/file/d/1TGbuWPAaXomunjj0my0wNbpDLSUg4DEK/view?usp=sharing).
+An example RGB-D video capture at [Rutgers CS Robotics Lab](https://robotics.cs.rutgers.edu) could be found at this [google drive link](https://drive.google.com/file/d/1TGbuWPAaXomunjj0my0wNbpDLSUg4DEK/view?usp=sharing).
 
 ## Reference
 \[1\] Newcombe, R. A., Izadi, S., Hilliges, O., Molyneaux, D., Kim, D., Davison, A. J., ... & Fitzgibbon, A. (2011, October). Kinectfusion: Real-time dense surface mapping and tracking. In 2011 10th IEEE international symposium on mixed and augmented reality (pp. 127-136). IEEE.
