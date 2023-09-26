@@ -18,7 +18,7 @@ from .kf_config import get_config
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-d", "--dataset", type=str, default='~/dataset/dartmouth_data')
+    parser.add_argument("-d", "--dataset", type=str, default='~/dataset')
     parser.add_argument("-v", "--video", type=str, default="0001")
     parser.add_argument("--start_frame", type=int, default=0)
     parser.add_argument("--end_frame", type=int, default=-1)
