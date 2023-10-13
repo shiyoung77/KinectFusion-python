@@ -4,7 +4,7 @@ It's light and fast (25~30 FPS with my RTX3090). \
 It has been tested on tabletop scenes for robot manipulation and small rooms for navigation :)
 
 ## Dependencies
-- Python >=3.6
+- Python >= 3.10
 - [CuPy](https://cupy.dev/) (check the installation guide on the official website)
 - [Open3D](https://github.com/isl-org/Open3D) (pip install open3d)
 - [cupoch](https://github.com/neka-nat/cupoch) (pip install cupoch)
